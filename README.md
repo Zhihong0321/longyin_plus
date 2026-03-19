@@ -16,6 +16,8 @@ This repository is organized so you can keep the mod project in GitHub without u
   Source files, helper scripts, and control tooling used to build and manage the mods.
 - `MODDING-NOTES-1.071F.md`
   Working notes for the current game version.
+- `PROJECT-NOTES.md`
+  Preserved local project instructions and repository-specific handling notes.
 
 ## What Is Not In This Repo
 
