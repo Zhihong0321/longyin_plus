@@ -1,0 +1,17 @@
+# Portable dist is intentionally tracked.
+
+# Temporary and generated build output
+mod-prototype/dist/
+mod-prototype/_codex_temp_reflect/
+mod-prototype/*/artifacts/
+
+# Local tool state
+mod-prototype/LongYinModControl/*.json
+mod-prototype/LongYinQuestSnapshot/test.txt
+
+# Logs
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
