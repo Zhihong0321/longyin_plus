@@ -461,6 +461,11 @@ Default recommended state:
 
 - `Enabled = false`
 
+Latest trace-data behavior:
+
+- the forced dialog continue hook now behaves like a fast-forward toggle
+- it skips dialog pacing instead of forcing auto-plot state changes
+
 ## Build / Deploy Commands
 
 Build all split plugins:

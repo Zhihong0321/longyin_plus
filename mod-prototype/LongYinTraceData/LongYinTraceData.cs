@@ -38,8 +38,8 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
         _characterCreationFlowEnabled = Config.Bind("CharacterCreationFlow", "Enabled", false, "Logs character-creation button presses, point-cost queries, and point-pool changes.");
         _dialogFlowEnabled = Config.Bind("DialogFlow", "Enabled", true, "Logs NPC dialog entry points, choice availability checks, and row grey-out state changes.");
         _dialogMonthlyLimitMultiplier = Config.Bind("DialogFlow", "MonthlyLimitMultiplier", 3f, "Scales the monthly use limit for dialog choices that consume playerInteractionTimeNeed.");
-        _forceAutoContinueEnabled = Config.Bind("DialogFlow", "ForceAutoContinueEnabled", true, "Forces dialog auto + fast-forward when toggled on.");
-        _forceAutoContinueHotkey = Config.Bind("DialogFlow", "ForceAutoContinueHotkey", KeyCode.P, "Hotkey used to toggle forced dialog auto + fast-forward.");
+        _forceAutoContinueEnabled = Config.Bind("DialogFlow", "ForceAutoContinueEnabled", true, "Forces dialog fast-forward when toggled on.");
+        _forceAutoContinueHotkey = Config.Bind("DialogFlow", "ForceAutoContinueHotkey", KeyCode.P, "Hotkey used to toggle forced dialog fast-forward.");
         _forceAutoContinueActive = _forceAutoContinueEnabled.Value;
 
         if (!_treasureFlowEnabled.Value && !_characterCreationFlowEnabled.Value && !_dialogFlowEnabled.Value)
@@ -289,7 +289,7 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
         if (CheckForcedAutoContinueHotkey())
         {
             _forceAutoContinueActive = !_forceAutoContinueActive;
-            LoggerInstance.LogInfo($"FORCE AUTO CONTINUE TOGGLE active={_forceAutoContinueActive}");
+            LoggerInstance.LogInfo($"FORCE FAST FORWARD TOGGLE active={_forceAutoContinueActive}");
             if (!_forceAutoContinueActive)
             {
                 __instance.SetAutoPlot(false);
@@ -437,12 +437,7 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
             return;
         }
 
-        controller.SetAutoPlot(true);
         controller.SetSkipPlot(true);
-        if (!controller.plotAutoing)
-        {
-            controller.plotAutoing = true;
-        }
 
         if (!controller.plotSkipping)
         {
