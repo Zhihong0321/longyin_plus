@@ -7,10 +7,13 @@ using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.19.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.9")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
+    private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
+    private const string TreasureChestChoicePlotCallbackName = nameof(PlotController.ChangePlotDataBase);
     private const int DailySkillInsightMaxLevel = 10;
     private const int LuckyMoneyMinPercent = 1;
     private const int LuckyMoneyMaxPercent = 30;
@@ -33,6 +36,12 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     internal static ManualLogSource LoggerInstance = null!;
 
     private static ConfigEntry<bool> _lockExploreStamina = null!;
+    private static ConfigEntry<bool> _revealExtraFogOnMove = null!;
+    private static ConfigEntry<int> _moveRevealRadius = null!;
+    private static ConfigEntry<bool> _revealAllOnStepTile = null!;
+    private static ConfigEntry<bool> _treasureChestChoiceEnabled = null!;
+    private static ConfigEntry<int> _treasureChestChoiceOptions = null!;
+    private static ConfigEntry<int> _treasureChestTotalItems = null!;
     private static ConfigEntry<int> _bookExpMultiplier = null!;
     private static ConfigEntry<int> _creationPointMultiplier = null!;
     private static ConfigEntry<int> _battleSpeedMultiplier = null!;
@@ -70,6 +79,10 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static readonly System.Random Random = new();
     private static bool _applyingLuckyMoneyRefund;
     private static bool _applyingDailySkillInsightExp;
+    private static bool _exploreFullRevealConsumed;
+    private static bool _grantingTreasureChestChoiceReward;
+    private static bool _grantingTreasureChestBonusItems;
+    private static bool _treasureChestChoiceClosingPlot;
     private static bool _dailySkillInsightBaselineReady;
     private static float _nextRealtimeDailySkillInsightAt = -1f;
     private static TimeData? _lastObservedWorldDate;
@@ -117,10 +130,39 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         public int Percent { get; init; }
     }
 
+    private sealed class ExploreHealingState
+    {
+        public HeroData? Player { get; init; }
+        public float ExternalInjuryBefore { get; init; }
+        public float InternalInjuryBefore { get; init; }
+        public float PoisonInjuryBefore { get; init; }
+        public bool IsHealingTile { get; init; }
+    }
+
+    private sealed class TreasureChestChoiceSession
+    {
+        public HeroData? Player { get; init; }
+        public List<ItemData> Options { get; init; } = new();
+        public bool SkipManageItemPoison { get; init; }
+        public bool Resolved { get; set; }
+        public float OpenedAtRealtime { get; init; }
+        public string? LastObservedChoiceParam { get; set; }
+        public bool PendingClickConfirm { get; set; }
+        public int PendingClickConfirmFrames { get; set; }
+    }
+
+    private static TreasureChestChoiceSession? _activeTreasureChestChoiceSession;
+
     public override void Load()
     {
         LoggerInstance = Log;
         _lockExploreStamina = Config.Bind("Exploration", "LockStamina", true, "Prevents exploration stamina from decreasing.");
+        _revealExtraFogOnMove = Config.Bind("Exploration", "RevealExtraFogOnMove", false, "Legacy compatibility toggle for the old per-move reveal experiment. No longer used.");
+        _moveRevealRadius = Config.Bind("Exploration", "MoveRevealRadius", 2, "Legacy compatibility value for the old per-move reveal experiment. No longer used.");
+        _revealAllOnStepTile = Config.Bind("Exploration", "RevealAllOnStepTile", true, "Reveal the whole exploration map once, after the first completed move in each exploration run.");
+        _treasureChestChoiceEnabled = Config.Bind("Exploration", "TreasureChestChoiceEnabled", true, "When true, exploration treasure chests show several reward items and let you choose 1.");
+        _treasureChestChoiceOptions = Config.Bind("Exploration", "TreasureChestChoiceOptions", 3, "How many reward options each exploration treasure chest should show when choice mode is enabled.");
+        _treasureChestTotalItems = Config.Bind("Exploration", "TreasureChestTotalItems", 2, "Total item rewards to grant from exploration treasure chests. Set to 1 for vanilla behavior.");
         _bookExpMultiplier = Config.Bind("ReadBook", "ExpMultiplier", 1, "Multiplies EXP gained from reading books.");
         _creationPointMultiplier = Config.Bind("CharacterCreation", "PointMultiplier", 1, "Multiplies the remaining point pools during character creation.");
         _battleSpeedMultiplier = Config.Bind("Battle", "SpeedMultiplier", 2, "Multiplies the selected in-battle speed option.");
@@ -155,6 +197,20 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _harmony = new Harmony("codex.longyin.staminalock");
         PatchMethod(typeof(ExploreController), "ChangeMoveStep", new[] { typeof(int) }, nameof(ChangeMoveStepPrefix), null);
         PatchMethod(typeof(ExploreController), "ChangeMoveStep", new[] { typeof(int), typeof(bool) }, nameof(ChangeMoveStepWithBoolPrefix), null);
+        PatchMethod(typeof(ExploreController), nameof(ExploreController.GenerateExploreMap), new[] { typeof(ExploreMapData), typeof(string), typeof(string) }, null, nameof(GenerateExploreMapPostfix));
+        PatchMethod(typeof(ExploreController), nameof(ExploreController.ResetExploreMap), Type.EmptyTypes, null, nameof(ResetExploreMapPostfix));
+        PatchMethod(typeof(ExploreController), nameof(ExploreController.PlayerFinishMove), Type.EmptyTypes, null, nameof(PlayerFinishMovePostfix));
+        PatchMethod(typeof(ExploreController), nameof(ExploreController.ManageTileEvent), new[] { typeof(ExploreTileData) }, nameof(ManageTileEventPrefix), nameof(ManageTileEventPostfix));
+        PatchMethod(typeof(HeroData), nameof(HeroData.GetItem), new[] { typeof(ItemData), typeof(bool), typeof(bool), typeof(int), typeof(bool) }, nameof(TreasureChestGetItemPrefix), nameof(TreasureChestGetItemPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.ChangePlotDataBase), new[] { typeof(string) }, nameof(TreasureChestChoicePlotCallbackPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlotBackgroundClicked), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.ChangeNextPlot), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.GoNextPlot), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.AutoPlotButtonClicked), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
+        PatchMethod(typeof(BuildChoiceButtonController), nameof(BuildChoiceButtonController.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
+        PatchMethod(typeof(UIButton), nameof(UIButton.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
+        PatchMethod(typeof(UIButtonMessage), nameof(UIButtonMessage.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
+        PatchMethod(typeof(ButtonClick), nameof(ButtonClick.OnPointerClick), new[] { typeof(PointerEventData) }, null, nameof(TreasureChestChoiceButtonClickedPostfix));
         PatchMethod(typeof(HeroData), nameof(HeroData.AddSkillBookExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(AddSkillBookExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeMoney), new[] { typeof(int), typeof(bool) }, nameof(ChangeMoneyPrefix), nameof(ChangeMoneyPostfix));
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeFavor), new[] { typeof(float), typeof(bool), typeof(float), typeof(float), typeof(bool) }, nameof(ChangeFavorPrefix), null);
@@ -192,6 +248,9 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo("LongYin Stamina Lock loaded.");
         Log.LogInfo("Legacy in-game mod panel is disabled. External Mod Control is the supported UI path.");
         Log.LogInfo($"Exploration stamina lock starts {(_lockExploreStamina.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Exploration first-move full reveal starts {(_revealAllOnStepTile.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Exploration treasure chest choice mode starts {(_treasureChestChoiceEnabled.Value ? "ON" : "OFF")} with a 3-5 option chest-only picker.");
+        Log.LogInfo($"Exploration treasure chest rewards start at x{Math.Max(1, _treasureChestTotalItems.Value)} total items when choice mode is OFF.");
         Log.LogInfo($"Read-book EXP multiplier starts at x{Mathf.Max(1, _bookExpMultiplier.Value)}.");
         Log.LogInfo($"Character creation point multiplier starts at x{Math.Max(1, _creationPointMultiplier.Value)}.");
         Log.LogInfo($"Battle speed multiplier starts at x{Math.Max(1, _battleSpeedMultiplier.Value)}.");
@@ -254,6 +313,577 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static void ChangeMoveStepWithBoolPrefix(ref int num, bool showText)
     {
         ChangeMoveStepPrefix(ref num);
+    }
+
+    private static void GenerateExploreMapPostfix()
+    {
+        ResetExploreFullReveal("GenerateExploreMap");
+    }
+
+    private static void ResetExploreMapPostfix()
+    {
+        ResetExploreFullReveal("ResetExploreMap");
+    }
+
+    private static void PlayerFinishMovePostfix(ExploreController __instance)
+    {
+        TryRevealAllExploreFogAfterFirstMove(__instance);
+    }
+
+    private static void ManageTileEventPrefix(ExploreTileData targetTileData, out ExploreHealingState __state)
+    {
+        var player = TryGetPlayerHero();
+        __state = new ExploreHealingState
+        {
+            Player = player,
+            ExternalInjuryBefore = player?.externalInjury ?? 0f,
+            InternalInjuryBefore = player?.internalInjury ?? 0f,
+            PoisonInjuryBefore = player?.poisonInjury ?? 0f,
+            IsHealingTile = IsHealingStateTile(targetTileData)
+        };
+    }
+
+    private static void ManageTileEventPostfix(ExploreController __instance, ExploreTileData targetTileData, ExploreHealingState __state)
+    {
+        TryHandleHealingStateTile(targetTileData, __state);
+    }
+
+    private static bool TreasureChestGetItemPrefix(HeroData __instance, ItemData itemData, bool showPopInfo, bool showSpeGetItem, int treasureChestClickTime, bool skipManageItemPoison)
+    {
+        return !TryStartTreasureChestChoice(__instance, itemData, treasureChestClickTime, skipManageItemPoison);
+    }
+
+    private static void TreasureChestGetItemPostfix(HeroData __instance, ItemData itemData, bool showPopInfo, bool showSpeGetItem, int treasureChestClickTime, bool skipManageItemPoison)
+    {
+        if (_treasureChestChoiceEnabled.Value)
+        {
+            return;
+        }
+
+        TryGrantTreasureChestBonusItems(__instance, itemData, treasureChestClickTime, skipManageItemPoison);
+    }
+
+    private static bool TreasureChestChoicePlotCallbackPrefix(object[] __args)
+    {
+        var param = __args != null && __args.Length > 0 ? __args[0] as string : null;
+        return !TryResolveTreasureChestChoiceFromPlot(param);
+    }
+
+    private static bool TreasureChestChoiceAdvancePrefix(PlotController? __instance)
+    {
+        if (_treasureChestChoiceClosingPlot)
+        {
+            return true;
+        }
+
+        var session = _activeTreasureChestChoiceSession;
+        if (session != null && !session.Resolved)
+        {
+            TryResolveTreasureChestChoiceAndClose(__instance);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static void TreasureChestChoiceButtonClickedPostfix()
+    {
+        var session = _activeTreasureChestChoiceSession;
+        if (session != null)
+        {
+            session.PendingClickConfirm = true;
+        }
+    }
+
+    private static void TryHandleHealingStateTile(ExploreTileData? targetTileData, ExploreHealingState? healingState)
+    {
+        if (healingState == null)
+        {
+            return;
+        }
+
+        var player = healingState.Player ?? TryGetPlayerHero();
+        if (player == null)
+        {
+            return;
+        }
+
+        var externalAfter = player.externalInjury;
+        var internalAfter = player.internalInjury;
+        var poisonAfter = player.poisonInjury;
+        var anyHealingDetected =
+            externalAfter + 0.001f < healingState.ExternalInjuryBefore ||
+            internalAfter + 0.001f < healingState.InternalInjuryBefore ||
+            poisonAfter + 0.001f < healingState.PoisonInjuryBefore;
+
+        if (!healingState.IsHealingTile && !anyHealingDetected)
+        {
+            return;
+        }
+
+        var curedAnything = false;
+
+        try
+        {
+            curedAnything |= TryClearHeroInjuryValue(player, player.externalInjury, static (hero, amount) => hero.ChangeExternalInjury(-amount, false, false, false), "externalInjury");
+        }
+        catch
+        {
+            curedAnything |= TrySetFloatMembers(player, new[] { "externalInjury", "ExternalInjury" }, 0f);
+        }
+
+        try
+        {
+            curedAnything |= TryClearHeroInjuryValue(player, player.internalInjury, static (hero, amount) => hero.ChangeInternalInjury(-amount, false, false, false), "internalInjury");
+        }
+        catch
+        {
+            curedAnything |= TrySetFloatMembers(player, new[] { "internalInjury", "InternalInjury" }, 0f);
+        }
+
+        try
+        {
+            curedAnything |= TryClearHeroInjuryValue(player, player.poisonInjury, static (hero, amount) => hero.ChangePoisonInjury(-amount, false, false, false), "poisonInjury");
+        }
+        catch
+        {
+            curedAnything |= TrySetFloatMembers(player, new[] { "poisonInjury", "PoisonInjury" }, 0f);
+        }
+
+        if (curedAnything)
+        {
+            PushPlayerLog("治疗地块额外清除了外伤、内伤、毒伤");
+            LoggerInstance.LogInfo(
+                $"Healing tile cleared all injury types: hero={TryGetHeroName(player)}, " +
+                $"external={SafeFormatValue(player.externalInjury)}, internal={SafeFormatValue(player.internalInjury)}, poison={SafeFormatValue(player.poisonInjury)}.");
+        }
+    }
+
+    private static bool TryStartTreasureChestChoice(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
+    {
+        if (!_treasureChestChoiceEnabled.Value || _grantingTreasureChestChoiceReward || _grantingTreasureChestBonusItems)
+        {
+            return false;
+        }
+
+        if (treasureChestClickTime <= 0 || targetHero == null || itemData == null)
+        {
+            return false;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null || TryGetHeroId(targetHero) != TryGetHeroId(player))
+        {
+            return false;
+        }
+
+        if (_activeTreasureChestChoiceSession != null)
+        {
+            LoggerInstance.LogWarning("Skipped treasure chest choice because another chest choice session is already active.");
+            return false;
+        }
+
+        var options = BuildTreasureChestChoiceOptions(itemData, player);
+        if (options.Count <= 1)
+        {
+            return false;
+        }
+
+        if (!TryShowTreasureChestChoicePlot(player, options, skipManageItemPoison))
+        {
+            return false;
+        }
+
+        LoggerInstance.LogInfo(
+            $"Treasure chest opened as choose-one reward with {options.Count} options: " +
+            $"{string.Join(", ", DescribeItemNames(options))}.");
+        return true;
+    }
+
+    private static List<ItemData> BuildTreasureChestChoiceOptions(ItemData sourceItem, HeroData player)
+    {
+        var options = new List<ItemData>();
+        var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        AddTreasureChestChoiceOption(options, seenKeys, sourceItem);
+
+        var maxChoiceCount = Math.Max(3, Math.Min(5, _treasureChestChoiceOptions.Value));
+        var desiredCount = maxChoiceCount <= 3 ? 3 : Random.Next(3, maxChoiceCount + 1);
+        var maxAttempts = Math.Max(desiredCount * 4, 8);
+        for (var attempt = 0; attempt < maxAttempts && options.Count < desiredCount; attempt++)
+        {
+            var generated = TryCreateTreasureChestBonusItem(sourceItem, player);
+            AddTreasureChestChoiceOption(options, seenKeys, generated);
+        }
+
+        return options;
+    }
+
+    private static void AddTreasureChestChoiceOption(List<ItemData> options, HashSet<string> seenKeys, ItemData? item)
+    {
+        if (item == null)
+        {
+            return;
+        }
+
+        var key = $"{item.itemID}|{item.itemLv}|{item.rareLv}|{item.value}|{item.name}";
+        if (!seenKeys.Add(key))
+        {
+            return;
+        }
+
+        options.Add(item);
+    }
+
+    private static bool TryShowTreasureChestChoicePlot(HeroData player, List<ItemData> options, bool skipManageItemPoison)
+    {
+        var plotController = PlotController.Instance;
+        if (plotController == null)
+        {
+            LoggerInstance.LogWarning("Could not show treasure chest choice plot because PlotController was unavailable.");
+            return false;
+        }
+
+        var choiceTexts = new Il2CppSystem.Collections.Generic.List<string>();
+        foreach (var option in options)
+        {
+            choiceTexts.Add(option.name ?? $"id={option.itemID}");
+        }
+
+        _activeTreasureChestChoiceSession = new TreasureChestChoiceSession
+        {
+            Player = player,
+            Options = options,
+            SkipManageItemPoison = skipManageItemPoison,
+            OpenedAtRealtime = Time.realtimeSinceStartup
+        };
+
+        try
+        {
+            var choiceDataList = new Il2CppSystem.Collections.Generic.List<SinglePlotChoiceData>();
+            for (var i = 0; i < options.Count; i++)
+            {
+                var choice = new SinglePlotChoiceData
+                {
+                    inited = true,
+                    choiceText = options[i].name ?? $"id={options[i].itemID}",
+                    callFuc = TreasureChestChoicePlotCallbackName,
+                    callParam = TreasureChestChoiceParamPrefix + i,
+                    describe = DescribeItemSummary(options[i])
+                };
+                choiceDataList.Add(choice);
+            }
+
+            var plot = new SinglePlotData
+            {
+                plotText = "宝箱里翻出几样东西，选一样带走。",
+                noAutoJump = true,
+                clickCallFuc = string.Empty,
+                choices = choiceDataList
+            };
+
+            plotController.ChangePlot(plot);
+            PushPlayerLog($"宝箱奖励改为 {options.Count} 选 1");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _activeTreasureChestChoiceSession = null;
+            LoggerInstance.LogWarning($"Failed to show treasure chest choice plot: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool TryResolveTreasureChestChoiceFromPlot(string? param)
+    {
+        var session = _activeTreasureChestChoiceSession;
+        if (session == null || session.Resolved)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(param) || !param.StartsWith(TreasureChestChoiceParamPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!int.TryParse(param.Substring(TreasureChestChoiceParamPrefix.Length), out var index))
+        {
+            return false;
+        }
+
+        if (index < 0 || index >= session.Options.Count)
+        {
+            LoggerInstance.LogWarning($"Treasure chest choice index out of range: {index}");
+            return true;
+        }
+
+        GrantTreasureChestChoiceReward(session, session.Options[index], $"plot:{index}");
+        return true;
+    }
+
+    private static bool TryResolveTreasureChestChoiceFromCurrentSelection(PlotController? plotController)
+    {
+        var session = _activeTreasureChestChoiceSession;
+        if (session == null || session.Resolved || plotController == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var newChoiceParam = TryGetChoiceParam(plotController.newChoice);
+            if (!string.IsNullOrWhiteSpace(newChoiceParam) &&
+                TryResolveTreasureChestChoiceFromPlot(newChoiceParam))
+            {
+                return true;
+            }
+
+            var currentChoiceParam = TryGetChoiceParam(plotController.nowChoice);
+            if (!string.IsNullOrWhiteSpace(currentChoiceParam) &&
+                TryResolveTreasureChestChoiceFromPlot(currentChoiceParam))
+            {
+                return true;
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to resolve treasure chest choice from current selection: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static void TryResolveTreasureChestChoiceAndClose(PlotController? plotController)
+    {
+        if (plotController == null)
+        {
+            return;
+        }
+
+        if (!TryResolveTreasureChestChoiceFromCurrentSelection(plotController))
+        {
+            return;
+        }
+
+        TryCloseTreasureChestChoicePlot(plotController);
+    }
+
+    private static void TryCloseTreasureChestChoicePlot(PlotController plotController)
+    {
+        if (_treasureChestChoiceClosingPlot)
+        {
+            return;
+        }
+
+        _treasureChestChoiceClosingPlot = true;
+        try
+        {
+            plotController.PlotTextShowFinished();
+            plotController.PlotChoiceShowFinished();
+            plotController.HideInteractUI();
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to close treasure chest choice plot: {ex.Message}");
+        }
+        finally
+        {
+            _treasureChestChoiceClosingPlot = false;
+        }
+    }
+
+    private static void GrantTreasureChestChoiceReward(TreasureChestChoiceSession session, ItemData chosenItem, string source)
+    {
+        if (session.Resolved)
+        {
+            return;
+        }
+
+        var player = session.Player ?? TryGetPlayerHero();
+        if (player == null)
+        {
+            LoggerInstance.LogWarning($"Could not grant treasure chest choice reward from {source} because the player was unavailable.");
+            session.Resolved = true;
+            _activeTreasureChestChoiceSession = null;
+            return;
+        }
+
+        session.Resolved = true;
+        _grantingTreasureChestChoiceReward = true;
+
+        try
+        {
+            player.GetItem(chosenItem, true, true, 0, session.SkipManageItemPoison);
+            PushPlayerLog($"宝箱选择获得：{chosenItem.name}");
+            LoggerInstance.LogInfo($"Treasure chest choice granted from {source}: {DescribeItemSummary(chosenItem)}");
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to grant chosen treasure chest item from {source}: {ex.Message}");
+        }
+        finally
+        {
+            _grantingTreasureChestChoiceReward = false;
+            _activeTreasureChestChoiceSession = null;
+        }
+    }
+
+    private static IEnumerable<string> DescribeItemNames(IEnumerable<ItemData> items)
+    {
+        foreach (var item in items)
+        {
+            yield return item?.name ?? "unknown";
+        }
+    }
+
+    private static string? TryGetTreasureChestCurrentChoiceParam(PlotController? plotController)
+    {
+        if (plotController == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var param = TryGetChoiceParam(plotController.newChoice);
+            if (!string.IsNullOrWhiteSpace(param))
+            {
+                return param;
+            }
+
+            return TryGetChoiceParam(plotController.nowChoice);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetChoiceParam(SinglePlotChoiceData? choice)
+    {
+        if (choice == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var param = choice.callParam;
+            return string.IsNullOrWhiteSpace(param) ? null : param;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void UpdateTreasureChestChoiceSession()
+    {
+        var session = _activeTreasureChestChoiceSession;
+        if (session == null || session.Resolved)
+        {
+            return;
+        }
+
+        var plotController = PlotController.Instance;
+        if (plotController == null)
+        {
+            return;
+        }
+
+        var currentParam = TryGetTreasureChestCurrentChoiceParam(plotController);
+        if (!string.IsNullOrWhiteSpace(currentParam))
+        {
+            if (string.IsNullOrWhiteSpace(session.LastObservedChoiceParam))
+            {
+                session.LastObservedChoiceParam = currentParam;
+            }
+            else if (!string.Equals(session.LastObservedChoiceParam, currentParam, StringComparison.Ordinal))
+            {
+                session.LastObservedChoiceParam = currentParam;
+                session.PendingClickConfirm = true;
+                session.PendingClickConfirmFrames = 2;
+            }
+        }
+
+        if (Input.GetMouseButtonDown(0) && Time.realtimeSinceStartup - session.OpenedAtRealtime > 0.15f)
+        {
+            session.PendingClickConfirm = true;
+            session.PendingClickConfirmFrames = Math.Max(session.PendingClickConfirmFrames, 2);
+        }
+
+        if (!session.PendingClickConfirm)
+        {
+            return;
+        }
+
+        if (session.PendingClickConfirmFrames > 0)
+        {
+            session.PendingClickConfirmFrames--;
+            return;
+        }
+
+        session.PendingClickConfirm = false;
+        plotController.AutoPlotButtonClicked();
+    }
+
+    private static void TryGrantTreasureChestBonusItems(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
+    {
+        if (_grantingTreasureChestBonusItems || treasureChestClickTime <= 0 || targetHero == null || itemData == null)
+        {
+            return;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null || TryGetHeroId(targetHero) != TryGetHeroId(player))
+        {
+            return;
+        }
+
+        var totalItems = Math.Max(1, _treasureChestTotalItems.Value);
+        var extraItemCount = totalItems - 1;
+        if (extraItemCount <= 0)
+        {
+            return;
+        }
+
+        var bonusNames = new List<string>();
+        _grantingTreasureChestBonusItems = true;
+
+        try
+        {
+            for (var i = 0; i < extraItemCount; i++)
+            {
+                var bonusItem = TryCreateTreasureChestBonusItem(itemData, player);
+                if (bonusItem == null)
+                {
+                    continue;
+                }
+
+                player.GetItem(bonusItem, false, false, 0, skipManageItemPoison);
+                bonusNames.Add(bonusItem.name ?? $"id={bonusItem.itemID}");
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to grant bonus treasure chest items: {ex.Message}");
+        }
+        finally
+        {
+            _grantingTreasureChestBonusItems = false;
+        }
+
+        if (bonusNames.Count <= 0)
+        {
+            return;
+        }
+
+        PushPlayerLog($"宝箱额外获得：{string.Join("、", bonusNames)}");
+        LoggerInstance.LogInfo(
+            $"Treasure chest granted {bonusNames.Count} bonus item(s): " +
+            $"{string.Join(", ", bonusNames)}.");
     }
 
     private static void ShowBuildingShopPostfix(BuildingUIController __instance)
@@ -917,6 +1547,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     {
         EnsureDailySkillInsightBaseline();
         TryRunRealtimeSkillInsight();
+        UpdateTreasureChestChoiceSession();
         KeepPlayerHorseTurboReady("Update");
         ApplyPlayerCarryWeightOverride("Update");
 
@@ -1393,6 +2024,16 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             $"Attri {attri}->{controller.leftAttriPoint}, " +
             $"Fight {fight}->{controller.leftFightSkillPoint}, " +
             $"Living {living}->{controller.leftLivingSkillPoint}.");
+    }
+
+    private static int TryGetCollectionCount(object? value)
+    {
+        if (value is System.Collections.ICollection collection)
+        {
+            return collection.Count;
+        }
+
+        return -1;
     }
 
     private static string DescribeArgs(object[]? args)
@@ -1934,6 +2575,20 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             float floatValue => Mathf.RoundToInt(floatValue),
             double doubleValue => (int)Math.Round(doubleValue),
             long longValue when longValue <= int.MaxValue && longValue >= int.MinValue => (int)longValue,
+            _ => null
+        };
+    }
+
+    private static bool? TryConvertToBool(object? value)
+    {
+        return value switch
+        {
+            null => null,
+            bool boolValue => boolValue,
+            int intValue => intValue != 0,
+            long longValue => longValue != 0,
+            float floatValue => Math.Abs(floatValue) > 0.001f,
+            double doubleValue => Math.Abs(doubleValue) > 0.001,
             _ => null
         };
     }
@@ -2720,6 +3375,151 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             && left.year == right.year
             && left.month == right.month
             && left.day == right.day;
+    }
+
+    private static bool IsHealingStateTile(ExploreTileData? tile)
+    {
+        if (tile == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return tile.exploreTileEventType == 7;
+        }
+        catch
+        {
+            var eventTypeValue = TryConvertToInt(SafeProperty(tile, "exploreTileEventType") ?? SafeField(tile, "exploreTileEventType"));
+            return eventTypeValue == 7;
+        }
+    }
+
+    private static void TryRevealAllExploreFogAfterFirstMove(ExploreController? controller)
+    {
+        if (!_revealAllOnStepTile.Value || _exploreFullRevealConsumed)
+        {
+            return;
+        }
+
+        if (!TryRevealAllExploreFog(controller))
+        {
+            return;
+        }
+
+        _exploreFullRevealConsumed = true;
+        LoggerInstance.LogInfo("Exploration fog fully revealed after first completed move.");
+    }
+
+    private static bool TryRevealAllExploreFog(ExploreController? controller)
+    {
+        if (controller == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            controller.SeeAllTile();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to reveal full exploration fog after Step(1): {ex.Message}");
+            return false;
+        }
+    }
+
+    private static ItemData? TryCreateTreasureChestBonusItem(ItemData sourceItem, HeroData targetHero)
+    {
+        try
+        {
+            var gameController = GameController.Instance;
+            if (gameController != null)
+            {
+                var generated = gameController.GenerateRandomItemValue(
+                    Math.Max(1f, sourceItem.value),
+                    Math.Max(1f, sourceItem.itemLv),
+                    targetHero);
+
+                if (generated != null)
+                {
+                    return generated;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to reroll bonus treasure chest item: {ex.Message}");
+        }
+
+        try
+        {
+            return sourceItem.Clone() as ItemData;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to clone treasure chest item: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static void ResetExploreFullReveal(string source)
+    {
+        if (_exploreFullRevealConsumed)
+        {
+            LoggerInstance.LogInfo($"Exploration full-reveal state reset from {source}.");
+        }
+
+        _exploreFullRevealConsumed = false;
+    }
+
+    private static bool TryClearHeroInjuryValue(HeroData hero, float currentValue, Func<HeroData, float, float> applyChange, string memberName)
+    {
+        if (currentValue <= 0.001f)
+        {
+            return false;
+        }
+
+        try
+        {
+            applyChange(hero, currentValue);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to clear {memberName} via change call: {ex.Message}");
+        }
+
+        return TrySetFloatMembers(hero, new[] { memberName, UppercaseFirst(memberName) }, 0f) || currentValue > 0.001f;
+    }
+
+    private static string UppercaseFirst(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        if (value.Length == 1)
+        {
+            return value.ToUpperInvariant();
+        }
+
+        return char.ToUpperInvariant(value[0]) + value.Substring(1);
+    }
+
+    private static string DescribeExploreTile(ExploreTileData? tile)
+    {
+        if (tile == null)
+        {
+            return "null";
+        }
+
+        var column = TryConvertToInt(SafeProperty(tile, "column") ?? SafeField(tile, "column"));
+        var row = TryConvertToInt(SafeProperty(tile, "row") ?? SafeField(tile, "row"));
+        var eventTypeValue = TryConvertToInt(SafeProperty(tile, "exploreTileEventType") ?? SafeField(tile, "exploreTileEventType"));
+        var eventHandled = TryConvertToBool(SafeProperty(tile, "eventHappen") ?? SafeField(tile, "eventHappen"));
+        return $"pos=({column?.ToString() ?? "?"},{row?.ToString() ?? "?"}), event={eventTypeValue?.ToString() ?? "?"}, eventHappen={eventHandled?.ToString() ?? "?"}";
     }
 
     private static string FormatDate(TimeData? date)

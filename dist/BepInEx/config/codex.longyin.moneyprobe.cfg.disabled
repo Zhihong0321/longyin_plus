@@ -1,0 +1,28 @@
+## Settings file was created by plugin LongYin Stamina Lock v0.4.0
+## Plugin GUID: codex.longyin.moneyprobe
+
+[Exploration]
+
+## Prevents exploration stamina from decreasing.
+# Setting type: Boolean
+# Default value: true
+LockStamina = true
+
+[General]
+
+Enabled = true
+
+BonusAmount = 1
+
+[Study]
+
+## Prevents study/read-book power from decreasing.
+# Setting type: Boolean
+# Default value: true
+LockPower = true
+
+## Doubles experience gained from reading books.
+# Setting type: Boolean
+# Default value: true
+DoubleBookExp = true
+

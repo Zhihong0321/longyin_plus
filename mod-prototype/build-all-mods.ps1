@@ -35,6 +35,12 @@ $mods = @(
         Live = Join-Path $repoRoot "BepInEx\plugins\LongYinTraceData.dll"
     }
     @{
+        Source = Join-Path $PSScriptRoot "LongYinSkillTalentTracer\LongYinSkillTalentTracer.cs"
+        Output = Join-Path $PSScriptRoot "LongYinSkillTalentTracer\artifacts\LongYinSkillTalentTracer.dll"
+        Staged = Join-Path $repoRoot "_codex_disabled_loader\BepInEx\plugins\LongYinSkillTalentTracer.dll"
+        Live = Join-Path $repoRoot "BepInEx\plugins\LongYinSkillTalentTracer.dll"
+    }
+    @{
         Source = Join-Path $PSScriptRoot "LongYinQuestSnapshot\LongYinQuestSnapshot.cs"
         Output = Join-Path $PSScriptRoot "LongYinQuestSnapshot\artifacts\LongYinQuestSnapshot.dll"
         Staged = Join-Path $repoRoot "_codex_disabled_loader\BepInEx\plugins\LongYinQuestSnapshot.dll"

@@ -52,7 +52,7 @@ The portable payload currently includes:
 
 - BepInEx loader/runtime files
 - `dotnet/`
-- plugin DLLs
+- plugin DLLs and disabled legacy artifacts
 - plugin config files
 - `LongYinModControl.ps1`
 - install notes
@@ -62,6 +62,7 @@ The portable payload currently includes:
 - `LongYinBattleTurbo`
 - `LongYinGameplayTest`
 - `LongYinQuestSnapshot`
+- `LongYinSkillTalentTracer`
 - `LongYinSkipIntro`
 - `LongYinStaminaLock`
 - `LongYinTraceData`

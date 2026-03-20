@@ -22,14 +22,24 @@ $bepInExDirs = @(
 )
 
 $pluginFiles = @(
+    "LongYinBattleTurbo.dll",
     "LongYinGameplayTest.dll",
+    "LongYinMoneyProbe.dll.disabled",
+    "LongYinQuestSnapshot.dll",
+    "LongYinSkillTalentTracer.dll",
+    "LongYinSkipIntro.dll",
     "LongYinStaminaLock.dll",
     "LongYinTraceData.dll"
 )
 
 $configFiles = @(
     "BepInEx.cfg",
+    "codex.longyin.battleturbo.cfg",
     "codex.longyin.gameplaytest.cfg",
+    "codex.longyin.moneyprobe.cfg.disabled",
+    "codex.longyin.questsnapshot.cfg",
+    "codex.longyin.skilltalenttracer.cfg",
+    "codex.longyin.skipintro.cfg",
     "codex.longyin.staminalock.cfg",
     "codex.longyin.tracedata.cfg"
 )
@@ -132,7 +142,7 @@ foreach ($fileName in $configFiles) {
     Copy-Item -Path $sourcePath -Destination (Join-Path $stageBepInExPath "config\$fileName") -Force
 }
 
-# Keep the requested extra plugins in the release, but ship them disabled by default.
+# Keep the requested extra plugins in the release, but ship trace-only or experimental ones disabled by default.
 Set-ConfigBoolean -path (Join-Path $stageBepInExPath "config\codex.longyin.gameplaytest.cfg") -name "Enabled" -value $false
 Set-ConfigBoolean -path (Join-Path $stageBepInExPath "config\codex.longyin.tracedata.cfg") -name "Enabled" -value $false
 

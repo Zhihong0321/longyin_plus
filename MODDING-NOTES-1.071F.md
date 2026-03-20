@@ -241,6 +241,104 @@ Practical conclusion:
 - use cursor/world popup text as the stable notification surface for now
 - treat left-side feed delivery as a separate unresolved UI hook
 
+## Dialog / Plot Handling Notes
+
+These notes are from the confirmed chest-choice and NPC dialog work.
+
+### Proven vanilla dialog close path
+
+For a normal NPC leave / `[bye bye]` close, the traced sequence was:
+
+- `PlotController.PlotTextShowFinished()`
+- `PlotController.PlotChoiceShowFinished()`
+- `PlotController.HideInteractUI()`
+- `PlotController.HideInteractUIBase()`
+
+Practical conclusion:
+
+- if a custom plot-style dialog needs to close cleanly, prefer reusing the game's own plot close flow
+- do not start with manual GameObject hiding or raw panel state mutation unless the normal plot close path fails
+
+## Repo Memory Snapshot
+
+This repository is the portable source-of-truth backup for the modded `LongYinLiZhiZhuan` setup.
+
+Current working assumptions to preserve:
+
+- GitHub repo: `Zhihong0321/longyin_plus`
+- `dist/` is the install overlay that gets copied into a clean game root
+- `run_this_first.ps1` and `run_this_first.cmd` are the supported install entry points
+- the repo should keep mod source, packaging scripts, and install notes
+- the repo should not store the base game itself or Steam-managed game assets
+- do not create or upload work-report files for this project
+
+### Treasure chest choice findings
+
+Normal open-treasure tiles are not the same system as digging treasure.
+
+Confirmed split:
+
+- digging choice path:
+  - `ExploreController.ManageTileEvent(event=6)`
+  - `PlotController.ChangePlot(...)`
+  - `PlotController.ChooseDigTreasure(...)`
+  - `PlotController.DigTreasureChoosen()`
+- normal treasure chest reward path:
+  - `HeroData.GetItem(... treasureChestClickTime=3)`
+
+Practical conclusion:
+
+- do not reuse `ChooseDigTreasure(...)` for normal chest behavior
+- chest mods should hook the chest reward path only
+- digging `event=6` should be left alone unless the goal is specifically to mod digging
+
+### Choice-row click behavior
+
+Important behavior from live testing:
+
+- clicking a choice row updates the game selection
+- that click does not necessarily confirm the choice by itself
+- the game's advance / auto-continue path uses the latest selected row correctly
+
+Practical conclusion:
+
+- when building choose-one dialogs on top of the game's plot UI, separate `selection` from `confirmation`
+- if row click needs to immediately finish the dialog, it is safer to trigger the same confirm/advance path the game already uses after the selection has settled
+- avoid assuming `nowChoice` is updated on the same frame as the click; delayed follow-up checks may be required
+
+### Custom plot choice construction
+
+Confirmed safe direction:
+
+- `SinglePlotChoiceData()` parameterless constructor
+- assign fields directly:
+  - `choiceText`
+  - `callFuc`
+  - `callParam`
+  - `describe`
+  - `inited = true`
+- `SinglePlotData` with:
+  - `plotText`
+  - `noAutoJump = true`
+  - `clickCallFuc = string.Empty`
+  - `choices = choiceDataList`
+
+Avoid:
+
+- relying on constructor overload assumptions without trace confirmation
+- assuming row click alone means the dialog will close
+
+### Trace workflow for dialogs
+
+Best targeted method:
+
+1. trace one exact dialog family only
+2. capture both open and close calls
+3. compare a known-good vanilla close flow against the custom dialog flow
+4. only then wire the custom dialog to the confirmed close sequence
+
+This was much more reliable than broad tracing or trying to infer the correct close path from field names alone.
+
 ## What Was Tried And Did Not Work Well
 
 ### Failed or poor-fit approaches

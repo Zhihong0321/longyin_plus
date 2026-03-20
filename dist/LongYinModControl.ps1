@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $configPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.staminalock.cfg"
 $traceDataConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.tracedata.cfg"
+$skillTalentConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.skilltalenttracer.cfg"
 $battleTurboConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.battleturbo.cfg"
 $gameExePath = Join-Path $repoRoot "LongYinLiZhiZhuan.exe"
 $doorstopConfigPath = Join-Path $repoRoot "doorstop_config.ini"
@@ -41,9 +42,9 @@ function Ensure-BepInExLoader() {
     }
 }
 
-function Get-DefaultConfigText([bool]$lockStamina, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [bool]$craftOneDayCrafting, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
+function Get-DefaultConfigText([bool]$lockStamina, [bool]$revealExtraFogOnMove, [int]$moveRevealRadius, [bool]$revealAllOnStepTile, [bool]$treasureChestChoiceEnabled, [int]$treasureChestChoiceOptions, [int]$treasureChestTotalItems, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [bool]$craftOneDayCrafting, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
     return @"
-## Settings file was created by plugin LongYin Stamina Lock v1.18.0
+## Settings file was created by plugin LongYin Stamina Lock v1.27.0
 ## Plugin GUID: codex.longyin.staminalock
 
 [Debug]
@@ -59,6 +60,36 @@ TraceMode = $($traceMode.ToString().ToLowerInvariant())
 # Setting type: Boolean
 # Default value: true
 LockStamina = $($lockStamina.ToString().ToLowerInvariant())
+
+## Legacy compatibility toggle for the old per-move reveal experiment. No longer used.
+# Setting type: Boolean
+# Default value: false
+RevealExtraFogOnMove = $($revealExtraFogOnMove.ToString().ToLowerInvariant())
+
+## Legacy compatibility value for the old per-move reveal experiment. No longer used.
+# Setting type: Int32
+# Default value: 2
+MoveRevealRadius = $moveRevealRadius
+
+## Reveal the whole exploration map once, after the first completed move in each exploration run.
+# Setting type: Boolean
+# Default value: true
+RevealAllOnStepTile = $($revealAllOnStepTile.ToString().ToLowerInvariant())
+
+## When true, exploration treasure chests show several reward items and let you choose 1.
+# Setting type: Boolean
+# Default value: true
+TreasureChestChoiceEnabled = $($treasureChestChoiceEnabled.ToString().ToLowerInvariant())
+
+## How many reward options each exploration treasure chest should show when choice mode is enabled.
+# Setting type: Int32
+# Default value: 3
+TreasureChestChoiceOptions = $treasureChestChoiceOptions
+
+## Total item rewards to grant from exploration treasure chests. Set to 1 for vanilla behavior.
+# Setting type: Int32
+# Default value: 2
+TreasureChestTotalItems = $treasureChestTotalItems
 
 [ReadBook]
 
@@ -199,6 +230,28 @@ UseRarityScaling = $($dailySkillInsightUseRarityScaling.ToString().ToLowerInvari
 # Default value: 0
 RealtimeIntervalSeconds = $dailySkillInsightRealtimeIntervalSeconds
 
+[SkillTalent]
+
+## Turns the skill-to-talent grant on or off.
+# Setting type: Boolean
+# Default value: true
+Enabled = $true
+
+## Skill level that triggers the talent-point grant.
+# Setting type: Int32
+# Default value: 10
+LevelThreshold = 10
+
+## Multiplies the granted talent points by skill tier.
+# Setting type: Single
+# Default value: 2
+TierPointMultiplier = 2
+
+## Only grant talent points when the player hero levels the skill.
+# Setting type: Boolean
+# Default value: true
+PlayerOnly = $true
+
 [Time]
 
 ## Blocks in-game day, month, and year progression.
@@ -220,19 +273,19 @@ CycleOutsideBattleSpeedHotkey = $outsideBattleSpeedHotkey
 
 function Ensure-ConfigFile {
     if (-not (Test-Path $configPath)) {
-        $defaultContent = Get-DefaultConfigText $true 1 1 2 1 1 1 1 $true 100000 $false 100000 0 0 1 1 $true $true 1 1 0 5 $true 0 $false $false "F1" "F11"
+        $defaultContent = Get-DefaultConfigText $true $false 2 $true 1 1 2 1 1 1 1 $true 100000 $false 100000 0 0 1 1 $true $true 1 1 0 5 $true 0 $false $false "F1" "F11"
         Set-Content -Path $configPath -Value $defaultContent -Encoding ASCII
     }
 }
 
 function Get-TraceDataDefaultConfigText([bool]$enabled) {
     return @"
-## Settings file was created by plugin LongYin Trace Data v1.0.0
+## Settings file was created by plugin LongYin Trace Data v2.0.0
 ## Plugin GUID: codex.longyin.tracedata
 
-[General]
+[TreasureFlow]
 
-## Turns the trace logger on for targeted reverse-engineering runs.
+## Logs only exploration treasure/chest flow for focused reverse-engineering.
 # Setting type: Boolean
 # Default value: false
 Enabled = $($enabled.ToString().ToLowerInvariant())
@@ -342,6 +395,38 @@ function Ensure-TraceDataConfigFile {
     }
 }
 
+function Ensure-SkillTalentConfigFile {
+    if (-not (Test-Path $skillTalentConfigPath)) {
+        $defaultContent = @"
+## Settings file was created by plugin LongYin Skill Talent Grant v1.0.0
+## Plugin GUID: codex.longyin.skilltalenttracer
+
+[SkillTalent]
+
+## Turns the skill-to-talent grant on or off.
+# Setting type: Boolean
+# Default value: true
+Enabled = true
+
+## Skill level that triggers the talent-point grant.
+# Setting type: Int32
+# Default value: 10
+LevelThreshold = 10
+
+## Multiplies the granted talent points by skill tier.
+# Setting type: Single
+# Default value: 2
+TierPointMultiplier = 2
+
+## Only grant talent points when the player hero levels the skill.
+# Setting type: Boolean
+# Default value: true
+PlayerOnly = true
+"@
+        Set-Content -Path $skillTalentConfigPath -Value $defaultContent -Encoding ASCII
+    }
+}
+
 function Ensure-BattleTurboConfigFile {
     if (-not (Test-Path $battleTurboConfigPath)) {
         $defaultContent = Get-BattleTurboDefaultConfigText $true "F8" 0.1 0.05 0.03 0 $true $true $true $false $true $true $false
@@ -357,6 +442,11 @@ function Get-ConfigText {
 function Get-TraceDataConfigText {
     Ensure-TraceDataConfigFile
     return Get-Content -Path $traceDataConfigPath -Raw
+}
+
+function Get-SkillTalentConfigText {
+    Ensure-SkillTalentConfigFile
+    return Get-Content -Path $skillTalentConfigPath -Raw
 }
 
 function Get-BattleTurboConfigText {
@@ -415,7 +505,7 @@ function Set-IniValue([string]$text, [string]$name, [string]$value) {
     return $trimmed + "$name = $value`r`n"
 }
 
-function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [bool]$craftOneDayCrafting, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
+function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [bool]$craftOneDayCrafting, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$skillTalentEnabled, [int]$skillTalentLevelThreshold, [double]$skillTalentTierPointMultiplier, [bool]$skillTalentPlayerOnly, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
     $expMultiplier = [Math]::Max(1, [Math]::Min(999, $expMultiplier))
     $creationPointMultiplier = [Math]::Max(1, [Math]::Min(999, $creationPointMultiplier))
     $battleSpeedMultiplier = [Math]::Max(1, [Math]::Min(999, $battleSpeedMultiplier))
@@ -434,9 +524,45 @@ function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPoin
     $dailySkillInsightChancePercent = [Math]::Max(0, [Math]::Min(100, $dailySkillInsightChancePercent))
     $dailySkillInsightExpPercent = [Math]::Max(0, [Math]::Min(999, $dailySkillInsightExpPercent))
     $dailySkillInsightRealtimeIntervalSeconds = [Math]::Max(0, [Math]::Min(999, $dailySkillInsightRealtimeIntervalSeconds))
-    $text = Get-DefaultConfigText $lockStamina $expMultiplier $creationPointMultiplier $battleSpeedMultiplier $horseBaseSpeedMultiplier $horseTurboSpeedMultiplier $horseTurboDurationMultiplier $horseTurboCooldownMultiplier $lockHorseTurboStamina $carryWeightCap $ignoreCarryWeight $merchantCarryCash $luckyHitChancePercent $extraRelationshipGainChancePercent $debatePlayerDamageTakenMultiplier $debateEnemyDamageTakenMultiplier $craftRandomPickUpgrade $craftOneDayCrafting $drinkPlayerPowerCostMultiplier $drinkEnemyPowerCostMultiplier $dailySkillInsightChancePercent $dailySkillInsightExpPercent $dailySkillInsightUseRarityScaling $dailySkillInsightRealtimeIntervalSeconds $traceMode $freezeDate $freezeHotkey $outsideBattleSpeedHotkey
+    $skillTalentLevelThreshold = [Math]::Max(1, [Math]::Min(999, $skillTalentLevelThreshold))
+    $skillTalentTierPointMultiplier = [Math]::Max(0.1, [Math]::Min(999, $skillTalentTierPointMultiplier))
+    $existingConfigText = Get-ConfigText
+    $revealExtraFogOnMove = Get-BoolValue $existingConfigText "RevealExtraFogOnMove" $true
+    $moveRevealRadius = [Math]::Max(0, [Math]::Min(99, (Get-IntValue $existingConfigText "MoveRevealRadius" 2)))
+    $revealAllOnStepTile = Get-BoolValue $existingConfigText "RevealAllOnStepTile" $true
+    $treasureChestChoiceEnabled = Get-BoolValue $existingConfigText "TreasureChestChoiceEnabled" $true
+    $treasureChestChoiceOptions = [Math]::Max(2, [Math]::Min(10, (Get-IntValue $existingConfigText "TreasureChestChoiceOptions" 3)))
+    $treasureChestTotalItems = [Math]::Max(1, [Math]::Min(20, (Get-IntValue $existingConfigText "TreasureChestTotalItems" 2)))
+    $text = Get-DefaultConfigText $lockStamina $revealExtraFogOnMove $moveRevealRadius $revealAllOnStepTile $treasureChestChoiceEnabled $treasureChestChoiceOptions $treasureChestTotalItems $expMultiplier $creationPointMultiplier $battleSpeedMultiplier $horseBaseSpeedMultiplier $horseTurboSpeedMultiplier $horseTurboDurationMultiplier $horseTurboCooldownMultiplier $lockHorseTurboStamina $carryWeightCap $ignoreCarryWeight $merchantCarryCash $luckyHitChancePercent $extraRelationshipGainChancePercent $debatePlayerDamageTakenMultiplier $debateEnemyDamageTakenMultiplier $craftRandomPickUpgrade $craftOneDayCrafting $drinkPlayerPowerCostMultiplier $drinkEnemyPowerCostMultiplier $dailySkillInsightChancePercent $dailySkillInsightExpPercent $dailySkillInsightUseRarityScaling $dailySkillInsightRealtimeIntervalSeconds $traceMode $freezeDate $freezeHotkey $outsideBattleSpeedHotkey
     Set-Content -Path $configPath -Value $text -Encoding ASCII
     Set-Content -Path $traceDataConfigPath -Value (Get-TraceDataDefaultConfigText $traceMode) -Encoding ASCII
+    $skillTalentText = @"
+## Settings file was created by plugin LongYin Skill Talent Grant v1.0.0
+## Plugin GUID: codex.longyin.skilltalenttracer
+
+[SkillTalent]
+
+## Turns the skill-to-talent grant on or off.
+# Setting type: Boolean
+# Default value: true
+Enabled = $($skillTalentEnabled.ToString().ToLowerInvariant())
+
+## Skill level that triggers the talent-point grant.
+# Setting type: Int32
+# Default value: 10
+LevelThreshold = $skillTalentLevelThreshold
+
+## Multiplies the granted talent points by skill tier.
+# Setting type: Single
+# Default value: 2
+TierPointMultiplier = $skillTalentTierPointMultiplier
+
+## Only grant talent points when the player hero levels the skill.
+# Setting type: Boolean
+# Default value: true
+PlayerOnly = $($skillTalentPlayerOnly.ToString().ToLowerInvariant())
+"@
+    Set-Content -Path $skillTalentConfigPath -Value $skillTalentText -Encoding ASCII
 }
 
 function Save-BattleTurboConfig([bool]$enabled, [string]$toggleHotkey) {
@@ -511,6 +637,11 @@ $dailySkillInsightChancePercentValue = Get-IntValue $configText "HitChancePercen
 $dailySkillInsightExpPercentValue = Get-FloatValue $configText "ExpPercent" 5
 $dailySkillInsightUseRarityScalingValue = Get-BoolValue $configText "UseRarityScaling" $true
 $dailySkillInsightRealtimeIntervalSecondsValue = Get-FloatValue $configText "RealtimeIntervalSeconds" 0
+$skillTalentConfigText = Get-SkillTalentConfigText
+$skillTalentEnabledValue = Get-BoolValue $skillTalentConfigText "Enabled" $true
+$skillTalentLevelThresholdValue = Get-IntValue $skillTalentConfigText "LevelThreshold" 10
+$skillTalentTierPointMultiplierValue = Get-FloatValue $skillTalentConfigText "TierPointMultiplier" 2
+$skillTalentPlayerOnlyValue = Get-BoolValue $skillTalentConfigText "PlayerOnly" $true
 $traceValue = (Get-BoolValue $configText "TraceMode" $false) -or (Get-BoolValue $traceDataConfigText "Enabled" $false)
 $freezeValue = Get-BoolValue $configText "FreezeDate" $false
 $freezeHotkeyValue = Get-StringValue $configText "ToggleFreezeDateHotkey" "F1"
@@ -560,6 +691,12 @@ $systemsTab.Text = "Systems"
 $systemsTab.BackColor = [System.Drawing.Color]::FromArgb(248, 244, 236)
 $systemsTab.AutoScroll = $true
 [void]$tabControl.TabPages.Add($systemsTab)
+
+$talentTab = New-Object System.Windows.Forms.TabPage
+$talentTab.Text = "Talent"
+$talentTab.BackColor = [System.Drawing.Color]::FromArgb(248, 244, 236)
+$talentTab.AutoScroll = $true
+[void]$tabControl.TabPages.Add($talentTab)
 
 $gameplayGroup = New-Object System.Windows.Forms.GroupBox
 $gameplayGroup.Text = "Gameplay"
@@ -885,6 +1022,77 @@ $systemGroup.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawi
 $systemGroup.Location = New-Object System.Drawing.Point(12, 12)
 $systemGroup.Size = New-Object System.Drawing.Size(548, 980)
 $systemsTab.Controls.Add($systemGroup)
+
+$talentGroup = New-Object System.Windows.Forms.GroupBox
+$talentGroup.Text = "Skill-to-Talent Grant"
+$talentGroup.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+$talentGroup.Location = New-Object System.Drawing.Point(12, 12)
+$talentGroup.Size = New-Object System.Drawing.Size(548, 260)
+$talentTab.Controls.Add($talentGroup)
+
+$skillTalentEnabledCheckbox = New-Object System.Windows.Forms.CheckBox
+$skillTalentEnabledCheckbox.Text = "Enable skill-to-talent grants"
+$skillTalentEnabledCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$skillTalentEnabledCheckbox.AutoSize = $true
+$skillTalentEnabledCheckbox.Location = New-Object System.Drawing.Point(18, 32)
+$skillTalentEnabledCheckbox.Checked = $skillTalentEnabledValue
+$talentGroup.Controls.Add($skillTalentEnabledCheckbox)
+
+$skillTalentLevelLabel = New-Object System.Windows.Forms.Label
+$skillTalentLevelLabel.Text = "Trigger level"
+$skillTalentLevelLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$skillTalentLevelLabel.AutoSize = $true
+$skillTalentLevelLabel.Location = New-Object System.Drawing.Point(18, 72)
+$talentGroup.Controls.Add($skillTalentLevelLabel)
+
+$skillTalentLevelBox = New-Object System.Windows.Forms.NumericUpDown
+$skillTalentLevelBox.Minimum = 1
+$skillTalentLevelBox.Maximum = 999
+$skillTalentLevelBox.Value = [decimal][Math]::Max(1, [Math]::Min(999, $skillTalentLevelThresholdValue))
+$skillTalentLevelBox.Font = New-Object System.Drawing.Font("Segoe UI", 11)
+$skillTalentLevelBox.Location = New-Object System.Drawing.Point(18, 100)
+$skillTalentLevelBox.Size = New-Object System.Drawing.Size(120, 34)
+$talentGroup.Controls.Add($skillTalentLevelBox)
+
+$skillTalentLevelHint = New-Object System.Windows.Forms.Label
+$skillTalentLevelHint.Text = "Use 10 for the rule you tested in game."
+$skillTalentLevelHint.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
+$skillTalentLevelHint.AutoSize = $true
+$skillTalentLevelHint.Location = New-Object System.Drawing.Point(150, 104)
+$talentGroup.Controls.Add($skillTalentLevelHint)
+
+$skillTalentMultiplierLabel = New-Object System.Windows.Forms.Label
+$skillTalentMultiplierLabel.Text = "Tier multiplier"
+$skillTalentMultiplierLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$skillTalentMultiplierLabel.AutoSize = $true
+$skillTalentMultiplierLabel.Location = New-Object System.Drawing.Point(18, 144)
+$talentGroup.Controls.Add($skillTalentMultiplierLabel)
+
+$skillTalentMultiplierBox = New-Object System.Windows.Forms.NumericUpDown
+$skillTalentMultiplierBox.Minimum = [decimal]0.1
+$skillTalentMultiplierBox.Maximum = [decimal]999
+$skillTalentMultiplierBox.DecimalPlaces = 2
+$skillTalentMultiplierBox.Increment = [decimal]0.25
+$skillTalentMultiplierBox.Value = [decimal][Math]::Max(0.1, [Math]::Min(999, $skillTalentTierPointMultiplierValue))
+$skillTalentMultiplierBox.Font = New-Object System.Drawing.Font("Segoe UI", 11)
+$skillTalentMultiplierBox.Location = New-Object System.Drawing.Point(18, 172)
+$skillTalentMultiplierBox.Size = New-Object System.Drawing.Size(120, 34)
+$talentGroup.Controls.Add($skillTalentMultiplierBox)
+
+$skillTalentMultiplierHint = New-Object System.Windows.Forms.Label
+$skillTalentMultiplierHint.Text = "Final grant = tier x multiplier."
+$skillTalentMultiplierHint.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
+$skillTalentMultiplierHint.AutoSize = $true
+$skillTalentMultiplierHint.Location = New-Object System.Drawing.Point(150, 176)
+$talentGroup.Controls.Add($skillTalentMultiplierHint)
+
+$skillTalentPlayerOnlyCheckbox = New-Object System.Windows.Forms.CheckBox
+$skillTalentPlayerOnlyCheckbox.Text = "Player hero only"
+$skillTalentPlayerOnlyCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$skillTalentPlayerOnlyCheckbox.AutoSize = $true
+$skillTalentPlayerOnlyCheckbox.Location = New-Object System.Drawing.Point(18, 216)
+$skillTalentPlayerOnlyCheckbox.Checked = $skillTalentPlayerOnlyValue
+$talentGroup.Controls.Add($skillTalentPlayerOnlyCheckbox)
 
 $traceCheckbox = New-Object System.Windows.Forms.CheckBox
 $traceCheckbox.Text = "Trace Mode (can hurt performance)"
@@ -1224,6 +1432,10 @@ $saveAction = {
         ([double](Get-NumericValue $dailyInsightExpBox)) `
         $dailyInsightRarityCheckbox.Checked `
         ([double](Get-NumericValue $dailyInsightRealtimeBox)) `
+        $skillTalentEnabledCheckbox.Checked `
+        ([int](Get-NumericValue $skillTalentLevelBox)) `
+        ([double](Get-NumericValue $skillTalentMultiplierBox)) `
+        $skillTalentPlayerOnlyCheckbox.Checked `
         $traceCheckbox.Checked `
         $freezeCheckbox.Checked `
         ([string]$hotkeyBox.SelectedItem) `
