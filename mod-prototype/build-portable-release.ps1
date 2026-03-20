@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$payloadRoot = Join-Path $repoRoot "dist"
 $releaseRoot = Join-Path $repoRoot "mod-prototype\dist"
 $gameVersion = "1.071F"
 $modVersion = "1.18.0"
@@ -14,10 +15,14 @@ $runtimeFiles = @(
     "winhttp.dll"
 )
 
+$rootFiles = @(
+    "Uninstall.cmd",
+    "Uninstall.ps1"
+)
+
 $bepInExDirs = @(
     "core",
     "interop",
-    "patchers",
     "unity-libs"
 )
 
@@ -88,10 +93,6 @@ function Copy-PortableControlScript([string]$sourcePath, [string]$destinationPat
         '$repoRoot = Resolve-Path $PSScriptRoot'
     )
 
-    if ($updated -eq $content) {
-        throw "Failed to rewrite repo root for portable control script."
-    }
-
     Set-Content -Path $destinationPath -Value $updated -Encoding ASCII
 }
 
@@ -99,9 +100,18 @@ New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 New-CleanDirectory -path $stagePath
 
 foreach ($relativePath in $runtimeFiles) {
-    $sourcePath = Join-Path $repoRoot $relativePath
+    $sourcePath = Join-Path $payloadRoot $relativePath
     if (-not (Test-Path $sourcePath)) {
         throw "Required runtime file not found: $sourcePath"
+    }
+
+    Copy-Item -Path $sourcePath -Destination (Join-Path $stagePath $relativePath) -Force
+}
+
+foreach ($relativePath in $rootFiles) {
+    $sourcePath = Join-Path $repoRoot $relativePath
+    if (-not (Test-Path $sourcePath)) {
+        throw "Required root file not found: $sourcePath"
     }
 
     Copy-Item -Path $sourcePath -Destination (Join-Path $stagePath $relativePath) -Force
@@ -111,7 +121,7 @@ Copy-PortableControlScript `
     -sourcePath (Join-Path $repoRoot "mod-prototype\LongYinModControl\LongYinModControl.ps1") `
     -destinationPath (Join-Path $stagePath "LongYinModControl.ps1")
 
-Copy-DirectoryIfPresent -sourcePath (Join-Path $repoRoot "dotnet") -destinationPath (Join-Path $stagePath "dotnet")
+Copy-DirectoryIfPresent -sourcePath (Join-Path $payloadRoot "dotnet") -destinationPath (Join-Path $stagePath "dotnet")
 
 $stageBepInExPath = Join-Path $stagePath "BepInEx"
 New-Item -ItemType Directory -Path $stageBepInExPath -Force | Out-Null
@@ -120,12 +130,12 @@ New-Item -ItemType Directory -Path (Join-Path $stageBepInExPath "config") -Force
 
 foreach ($dirName in $bepInExDirs) {
     Copy-DirectoryIfPresent `
-        -sourcePath (Join-Path $repoRoot "BepInEx\$dirName") `
+        -sourcePath (Join-Path $payloadRoot "BepInEx\$dirName") `
         -destinationPath (Join-Path $stageBepInExPath $dirName)
 }
 
 foreach ($fileName in $pluginFiles) {
-    $sourcePath = Join-Path $repoRoot "BepInEx\plugins\$fileName"
+    $sourcePath = Join-Path $payloadRoot "BepInEx\plugins\$fileName"
     if (-not (Test-Path $sourcePath)) {
         throw "Required plugin file not found: $sourcePath"
     }
@@ -134,7 +144,7 @@ foreach ($fileName in $pluginFiles) {
 }
 
 foreach ($fileName in $configFiles) {
-    $sourcePath = Join-Path $repoRoot "BepInEx\config\$fileName"
+    $sourcePath = Join-Path $payloadRoot "BepInEx\config\$fileName"
     if (-not (Test-Path $sourcePath)) {
         throw "Required config file not found: $sourcePath"
     }
@@ -145,6 +155,15 @@ foreach ($fileName in $configFiles) {
 # Keep the requested extra plugins in the release, but ship trace-only or experimental ones disabled by default.
 Set-ConfigBoolean -path (Join-Path $stageBepInExPath "config\codex.longyin.gameplaytest.cfg") -name "Enabled" -value $false
 Set-ConfigBoolean -path (Join-Path $stageBepInExPath "config\codex.longyin.tracedata.cfg") -name "Enabled" -value $false
+
+foreach ($relativePath in $rootFiles) {
+    $sourcePath = Join-Path $repoRoot $relativePath
+    if (-not (Test-Path $sourcePath)) {
+        throw "Required root file not found: $sourcePath"
+    }
+
+    Copy-Item -Path $sourcePath -Destination (Join-Path $stagePath (Split-Path $relativePath -Leaf)) -Force
+}
 
 Copy-Item `
     -Path (Join-Path $repoRoot "mod-prototype\release-assets\安装与运行说明.md") `

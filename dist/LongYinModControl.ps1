@@ -1,15 +1,65 @@
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+param(
+    [string]$GameRoot = ""
+)
 
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$gameExeName = "LongYinLiZhiZhuan.exe"
+$steamAppId = "3202030"
+
+function Resolve-GameRoot {
+    param(
+        [string]$RequestedPath,
+        [string]$StartPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $resolved = Resolve-Path $RequestedPath -ErrorAction Stop
+        $item = Get-Item $resolved.Path
+
+        if ($item.PSIsContainer) {
+            $candidate = $item.FullName
+        }
+        else {
+            $candidate = Split-Path $item.FullName -Parent
+        }
+
+        if (-not (Test-Path (Join-Path $candidate $gameExeName))) {
+            throw "Could not find $gameExeName in $candidate."
+        }
+
+        return (Resolve-Path $candidate).Path
+    }
+
+    $startLocation = if ([string]::IsNullOrWhiteSpace($StartPath)) { (Get-Location).Path } else { $StartPath }
+    $current = (Resolve-Path $startLocation).Path
+    while ($true) {
+        if (Test-Path (Join-Path $current $gameExeName)) {
+            return $current
+        }
+
+        $parent = Split-Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
+            break
+        }
+
+        $current = $parent
+    }
+
+    throw "Could not locate $gameExeName near $StartPath."
+}
+
+$repoRoot = Resolve-GameRoot -RequestedPath $GameRoot -StartPath $PSScriptRoot
 $configPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.staminalock.cfg"
 $traceDataConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.tracedata.cfg"
 $skillTalentConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.skilltalenttracer.cfg"
 $battleTurboConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.battleturbo.cfg"
-$gameExePath = Join-Path $repoRoot "LongYinLiZhiZhuan.exe"
+$gameExePath = Join-Path $repoRoot $gameExeName
 $doorstopConfigPath = Join-Path $repoRoot "doorstop_config.ini"
+$steamAppIdPath = Join-Path $repoRoot "steam_appid.txt"
 
 function Ensure-BepInExLoader() {
     if (-not (Test-Path $doorstopConfigPath)) {
@@ -38,8 +88,19 @@ function Ensure-BepInExLoader() {
     }
 
     if ($updated) {
-        Set-Content -Path $doorstopConfigPath -Value $content
+        Set-Content -Path $doorstopConfigPath -Value $content -Encoding ASCII
     }
+}
+
+function Ensure-SteamAppIdFile {
+    if (Test-Path $steamAppIdPath) {
+        $currentValue = (Get-Content -Path $steamAppIdPath -Raw).Trim()
+        if ($currentValue -ne $steamAppId) {
+            Copy-Item -Path $steamAppIdPath -Destination "$steamAppIdPath.bak" -Force
+        }
+    }
+
+    Set-Content -Path $steamAppIdPath -Value $steamAppId -Encoding ASCII
 }
 
 function Get-DefaultConfigText([bool]$lockStamina, [bool]$revealExtraFogOnMove, [int]$moveRevealRadius, [bool]$revealAllOnStepTile, [bool]$treasureChestChoiceEnabled, [int]$treasureChestChoiceOptions, [int]$treasureChestTotalItems, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [bool]$craftOneDayCrafting, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
@@ -1453,6 +1514,7 @@ $launchAction = {
     }
 
     Ensure-BepInExLoader
+    Ensure-SteamAppIdFile
     Start-Process -FilePath $gameExePath -WorkingDirectory $repoRoot | Out-Null
     Set-Status $statusLabel "Launched"
 }
