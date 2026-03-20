@@ -47,7 +47,11 @@ Stable releases are published on GitHub Releases:
 
 - [Latest stable download](https://github.com/Zhihong0321/longyin_plus/releases/latest)
 
-Download the latest ZIP, extract it anywhere, then double-click `Install.cmd`. The same bundle also includes `Uninstall.cmd` for clean removal.
+If Releases are not visible yet, use the direct repo download:
+
+- [Direct latest ZIP](https://github.com/Zhihong0321/longyin_plus/raw/main/download/LongYinPlus-Latest.zip)
+
+Download the ZIP, extract it anywhere, then double-click `Install.cmd`. The same bundle also includes `Uninstall.cmd` for clean removal.
 
 ## Manual Install
 
