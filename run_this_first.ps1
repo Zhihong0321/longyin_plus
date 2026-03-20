@@ -187,6 +187,19 @@ function Ensure-SteamAppId {
     Set-Content -Path $steamAppIdPath -Value $steamAppId -Encoding ASCII
 }
 
+function Unblock-InstalledFiles {
+    param([string]$TargetRoot)
+
+    Get-ChildItem -Path $TargetRoot -Recurse -File | ForEach-Object {
+        try {
+            Unblock-File -Path $_.FullName
+        }
+        catch {
+            # Some files may not expose a zone stream; skip them quietly.
+        }
+    }
+}
+
 Assert-PathExists -Path $distRoot -Label "dist folder"
 
 $targetRoot = Resolve-GameRoot -RequestedPath $GameRoot
@@ -204,6 +217,7 @@ Get-ChildItem -Path $distRoot -Force | Where-Object { $_.Name -notlike "*.zip" }
     Copy-Item -Path $_.FullName -Destination $targetRoot -Recurse -Force
 }
 Ensure-SteamAppId -TargetRoot $targetRoot
+Unblock-InstalledFiles -TargetRoot $targetRoot
 
 Write-Host "Install complete."
 Write-Host "You can now run LongYinModControl.cmd from the game root."

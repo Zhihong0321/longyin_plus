@@ -38,7 +38,7 @@ This repo only stores the mod project and the portable mod overlay.
 3. Double-click `Install.cmd`.
 4. If the game is found automatically, the installer will copy `dist/` into the game root.
 5. If auto-detection fails, choose the folder that contains `LongYinLiZhiZhuan.exe`.
-6. After install, double-click `Play.cmd` for a plain launch or `LongYinModControl.cmd` if you want to adjust settings.
+6. After install, double-click `Play.cmd` to open the mod control UI and launch the game, or `LaunchGame.cmd` for a plain launch.
 7. If you need to remove the mod later, run `Uninstall.cmd`.
 
 ## Download
@@ -52,6 +52,7 @@ If Releases are not visible yet, use the direct repo download:
 - [Direct latest ZIP](https://github.com/Zhihong0321/longyin_plus/raw/main/download/LongYinPlus-Latest.zip)
 
 Download the ZIP, extract it anywhere, then double-click `Install.cmd`. The same bundle also includes `Uninstall.cmd` for clean removal.
+The installer also clears Windows download marks from the copied mod files, which helps reduce Defender cloud scan popups on first launch.
 
 ## Manual Install
 
@@ -73,6 +74,7 @@ The portable payload currently includes:
 - `LongYinModControl.cmd`
 - `LaunchGame.cmd`
 - `Play.cmd`
+  Opens the control UI first.
 - `Uninstall.cmd`
 - `Uninstall.ps1`
 - `steam_appid.txt`
@@ -95,7 +97,7 @@ The portable payload currently includes:
 3. Reinstall a clean game copy.
 4. Run `Uninstall.cmd` from the release bundle or the installed game folder.
 5. Download the latest release ZIP and run `Install.cmd` again.
-6. Launch the game with `Play.cmd`.
+6. Launch the game with `Play.cmd` so the control UI opens first.
 
 ## Notes
 
