@@ -29,6 +29,7 @@ $bepInExDirs = @(
 $pluginFiles = @(
     "LongYinBattleTurbo.dll",
     "LongYinGameplayTest.dll",
+    "LongYinHorseStaminaMultiplier.dll",
     "LongYinMoneyProbe.dll.disabled",
     "LongYinQuestSnapshot.dll",
     "LongYinSkillTalentTracer.dll",
@@ -41,6 +42,7 @@ $configFiles = @(
     "BepInEx.cfg",
     "codex.longyin.battleturbo.cfg",
     "codex.longyin.gameplaytest.cfg",
+    "codex.longyin.horsestamina.cfg",
     "codex.longyin.moneyprobe.cfg.disabled",
     "codex.longyin.questsnapshot.cfg",
     "codex.longyin.skilltalenttracer.cfg",

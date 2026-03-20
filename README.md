@@ -49,7 +49,7 @@ Stable releases are published on GitHub Releases:
 
 If Releases are not visible yet, use the direct repo download:
 
-- [Direct latest ZIP](https://github.com/Zhihong0321/longyin_plus/raw/main/download/LongYinPlus-Latest.zip)
+- [Direct latest ZIP](https://github.com/Zhihong0321/longyin_plus/raw/main/download/LongYin-Mod-Portable-v1.18.0-for-1.071F.zip)
 
 Download the ZIP, extract it anywhere, then double-click `Install.cmd`. The same bundle also includes `Uninstall.cmd` for clean removal.
 The installer also clears Windows download marks from the copied mod files, which helps reduce Defender cloud scan popups on first launch.
@@ -84,6 +84,7 @@ The portable payload currently includes:
 
 - `LongYinBattleTurbo`
 - `LongYinGameplayTest`
+- `LongYinHorseStaminaMultiplier`
 - `LongYinQuestSnapshot`
 - `LongYinSkillTalentTracer`
 - `LongYinSkipIntro`
