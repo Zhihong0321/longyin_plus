@@ -5,7 +5,7 @@ $releaseRoot = Join-Path $repoRoot "mod-prototype\release-build"
 $outputRoot = Join-Path $repoRoot "mod-prototype\dist"
 
 $gameVersion = "1.071F"
-$modVersion = "1.18.0"
+$modVersion = "1.19.0"
 $bundleName = "LongYinPlus-InstallBundle-v$modVersion-for-$gameVersion"
 $stagePath = Join-Path $releaseRoot $bundleName
 $zipPath = Join-Path $outputRoot "$bundleName.zip"

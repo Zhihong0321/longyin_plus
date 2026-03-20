@@ -104,7 +104,7 @@ function Ensure-SteamAppIdFile {
     Set-Content -Path $steamAppIdPath -Value $steamAppId -Encoding ASCII
 }
 
-function Get-DefaultConfigText([bool]$lockStamina, [bool]$revealExtraFogOnMove, [int]$moveRevealRadius, [bool]$revealAllOnStepTile, [bool]$treasureChestChoiceEnabled, [int]$treasureChestChoiceOptions, [int]$treasureChestTotalItems, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [bool]$craftOneDayCrafting, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
+function Get-DefaultConfigText([bool]$lockStamina, [bool]$revealExtraFogOnMove, [int]$moveRevealRadius, [bool]$revealAllOnStepTile, [bool]$treasureChestChoiceEnabled, [int]$treasureChestChoiceOptions, [int]$treasureChestTotalItems, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
     return @"
 ## Settings file was created by plugin LongYin Stamina Lock v1.27.0
 ## Plugin GUID: codex.longyin.staminalock
@@ -252,11 +252,6 @@ EnemyDamageTakenMultiplier = $debateEnemyDamageTakenMultiplier
 # Setting type: Boolean
 # Default value: true
 RandomPickUpgrade = $($craftRandomPickUpgrade.ToString().ToLowerInvariant())
-
-## When true, normal crafting only advances 1 in-game day even if the recipe would normally take longer.
-# Setting type: Boolean
-# Default value: true
-OneDayCrafting = $($craftOneDayCrafting.ToString().ToLowerInvariant())
 
 [Drink]
 
@@ -567,7 +562,7 @@ function Set-IniValue([string]$text, [string]$name, [string]$value) {
     return $trimmed + "$name = $value`r`n"
 }
 
-function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$horseStaminaMultiplier, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [bool]$craftOneDayCrafting, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$skillTalentEnabled, [int]$skillTalentLevelThreshold, [double]$skillTalentTierPointMultiplier, [bool]$skillTalentPlayerOnly, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
+function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$horseStaminaMultiplier, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$skillTalentEnabled, [int]$skillTalentLevelThreshold, [double]$skillTalentTierPointMultiplier, [bool]$skillTalentPlayerOnly, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
     $expMultiplier = [Math]::Max(1, [Math]::Min(999, $expMultiplier))
     $creationPointMultiplier = [Math]::Max(1, [Math]::Min(999, $creationPointMultiplier))
     $battleSpeedMultiplier = [Math]::Max(1, [Math]::Min(999, $battleSpeedMultiplier))
@@ -596,7 +591,7 @@ function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPoin
     $treasureChestChoiceEnabled = Get-BoolValue $existingConfigText "TreasureChestChoiceEnabled" $true
     $treasureChestChoiceOptions = [Math]::Max(2, [Math]::Min(10, (Get-IntValue $existingConfigText "TreasureChestChoiceOptions" 3)))
     $treasureChestTotalItems = [Math]::Max(1, [Math]::Min(20, (Get-IntValue $existingConfigText "TreasureChestTotalItems" 2)))
-    $text = Get-DefaultConfigText $lockStamina $revealExtraFogOnMove $moveRevealRadius $revealAllOnStepTile $treasureChestChoiceEnabled $treasureChestChoiceOptions $treasureChestTotalItems $expMultiplier $creationPointMultiplier $battleSpeedMultiplier $horseBaseSpeedMultiplier $horseTurboSpeedMultiplier $horseTurboDurationMultiplier $horseTurboCooldownMultiplier $lockHorseTurboStamina $carryWeightCap $ignoreCarryWeight $merchantCarryCash $luckyHitChancePercent $extraRelationshipGainChancePercent $debatePlayerDamageTakenMultiplier $debateEnemyDamageTakenMultiplier $craftRandomPickUpgrade $craftOneDayCrafting $drinkPlayerPowerCostMultiplier $drinkEnemyPowerCostMultiplier $dailySkillInsightChancePercent $dailySkillInsightExpPercent $dailySkillInsightUseRarityScaling $dailySkillInsightRealtimeIntervalSeconds $traceMode $freezeDate $freezeHotkey $outsideBattleSpeedHotkey
+    $text = Get-DefaultConfigText $lockStamina $revealExtraFogOnMove $moveRevealRadius $revealAllOnStepTile $treasureChestChoiceEnabled $treasureChestChoiceOptions $treasureChestTotalItems $expMultiplier $creationPointMultiplier $battleSpeedMultiplier $horseBaseSpeedMultiplier $horseTurboSpeedMultiplier $horseTurboDurationMultiplier $horseTurboCooldownMultiplier $lockHorseTurboStamina $carryWeightCap $ignoreCarryWeight $merchantCarryCash $luckyHitChancePercent $extraRelationshipGainChancePercent $debatePlayerDamageTakenMultiplier $debateEnemyDamageTakenMultiplier $craftRandomPickUpgrade $drinkPlayerPowerCostMultiplier $drinkEnemyPowerCostMultiplier $dailySkillInsightChancePercent $dailySkillInsightExpPercent $dailySkillInsightUseRarityScaling $dailySkillInsightRealtimeIntervalSeconds $traceMode $freezeDate $freezeHotkey $outsideBattleSpeedHotkey
     Set-Content -Path $configPath -Value $text -Encoding ASCII
     $horseText = @"
 ## Settings file was created by plugin LongYin Horse Stamina Multiplier v1.0.0
@@ -707,7 +702,6 @@ $extraRelationshipGainChancePercentValue = Get-IntValue $configText "ExtraRelati
 $debatePlayerDamageTakenMultiplierValue = Get-FloatValue $configText "PlayerDamageTakenMultiplier" 1
 $debateEnemyDamageTakenMultiplierValue = Get-FloatValue $configText "EnemyDamageTakenMultiplier" 1
 $craftRandomPickUpgradeValue = Get-BoolValue $configText "RandomPickUpgrade" $true
-$craftOneDayCraftingValue = Get-BoolValue $configText "OneDayCrafting" $true
 $drinkPlayerPowerCostMultiplierValue = Get-FloatValue $configText "PlayerPowerCostMultiplier" 1
 $drinkEnemyPowerCostMultiplierValue = Get-FloatValue $configText "EnemyPowerCostMultiplier" 1
 $dailySkillInsightChancePercentValue = Get-IntValue $configText "HitChancePercent" 0
@@ -1084,14 +1078,6 @@ $craftRandomPickUpgradeHint.Font = New-Object System.Drawing.Font("Segoe UI", 9,
 $craftRandomPickUpgradeHint.Size = New-Object System.Drawing.Size(380, 40)
 $craftRandomPickUpgradeHint.Location = New-Object System.Drawing.Point(38, 946)
 $gameplayGroup.Controls.Add($craftRandomPickUpgradeHint)
-
-$craftOneDayCraftingCheckbox = New-Object System.Windows.Forms.CheckBox
-$craftOneDayCraftingCheckbox.Text = "Normal crafting always costs 1 day"
-$craftOneDayCraftingCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-$craftOneDayCraftingCheckbox.AutoSize = $true
-$craftOneDayCraftingCheckbox.Location = New-Object System.Drawing.Point(18, 994)
-$craftOneDayCraftingCheckbox.Checked = $craftOneDayCraftingValue
-$gameplayGroup.Controls.Add($craftOneDayCraftingCheckbox)
 
 $merchantCashLabel = New-Object System.Windows.Forms.Label
 $merchantCashLabel.Text = "Merchant cash floor"
@@ -1528,7 +1514,6 @@ $saveAction = {
         ([double](Get-NumericValue $debatePlayerDamageBox)) `
         ([double](Get-NumericValue $debateEnemyDamageBox)) `
         $craftRandomPickUpgradeCheckbox.Checked `
-        $craftOneDayCraftingCheckbox.Checked `
         ([double](Get-NumericValue $drinkPlayerPowerBox)) `
         ([double](Get-NumericValue $drinkEnemyPowerBox)) `
         ([int](Get-NumericValue $dailyInsightChanceBox)) `
