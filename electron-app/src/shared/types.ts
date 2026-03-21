@@ -96,6 +96,9 @@ export interface GameHealth {
 export interface GameSnapshot {
   appVersion: string;
   payloadRoot: string;
+  userDataRoot: string;
+  startupLogPath: string;
+  otaLogPath: string;
   gameRoot?: string;
   gameRootDetected: boolean;
   gameInstalled: boolean;

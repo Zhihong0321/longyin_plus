@@ -154,6 +154,9 @@ export function App() {
   const health = snapshot?.health ?? { healthy: false, needsRepair: false, summary: '正在加载自检状态。', driftedFiles: [], checks: [] };
   const failedChecks = health.checks.filter((check) => !check.ok);
   const payloadRoot = snapshot?.payloadRoot ?? '';
+  const userDataRoot = snapshot?.userDataRoot ?? '';
+  const startupLogPath = snapshot?.startupLogPath ?? '';
+  const otaLogPath = snapshot?.otaLogPath ?? '';
   const launchReady = snapshot?.launchReady ?? false;
   const launchBusy = snapshot?.launchState === 'starting' || snapshot?.launchState === 'running';
 
@@ -226,7 +229,25 @@ export function App() {
   };
 
   const applyUpdate = async () => {
-    await run('应用更新', () => window.longyin.applyUpdate());
+    setWorking('下载更新中');
+    setError(null);
+    setMessage('正在下载并应用更新，请不要关闭窗口。应用会先退出，再自动重启到新版本。');
+    try {
+      const result = await window.longyin.applyUpdate();
+      if (result?.updatedSnapshot) {
+        setSnapshot(result.updatedSnapshot);
+        setSettings(result.updatedSnapshot.visibleSettings);
+        setUpdate(result.updatedSnapshot.update);
+        setMessage(result.message ?? '更新包已下载。请等待应用自动重启。');
+      }
+    }
+    catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setMessage('应用更新失败。请打开日志查看详细原因。');
+    }
+    finally {
+      setWorking(null);
+    }
   };
 
   const openReleasePage = async (targetUrl?: string) => {
@@ -244,6 +265,12 @@ export function App() {
   const openPayloadRoot = async () => {
     if (payloadRoot) {
       await window.longyin.openPath(payloadRoot);
+    }
+  };
+
+  const openLogFolder = async () => {
+    if (userDataRoot) {
+      await window.longyin.openPath(userDataRoot);
     }
   };
 
@@ -412,9 +439,12 @@ export function App() {
                   <button className="btn" onClick={() => setActiveTab('updates')}>
                     查看历史
                   </button>
+                  <button className="btn" onClick={openLogFolder} disabled={!userDataRoot}>
+                    打开日志目录
+                  </button>
                   {update?.updateAvailable ? (
                     <button className="btn btn--accent" onClick={applyUpdate} disabled={working !== null || launchBusy}>
-                      应用更新
+                      {working === '下载更新中' ? '更新下载中...' : '应用更新'}
                     </button>
                   ) : null}
                 </div>
@@ -477,6 +507,24 @@ export function App() {
                   </button>
                   <button className="btn" onClick={() => void refresh()} disabled={working !== null}>
                     刷新自检
+                  </button>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="错误与日志" eyebrow="排错">
+              <div className="stack">
+                <p className="body-copy">
+                  更新失败、保存失败、自动重启失败时，详细过程会落到本地日志，不再只闪一下红条。
+                </p>
+                <div className="path-box">{userDataRoot || '未找到日志目录'}</div>
+                <div className="check-list">
+                  <div className="check-list__item">启动日志: {startupLogPath || '未生成'}</div>
+                  <div className="check-list__item">OTA 日志: {otaLogPath || '未生成'}</div>
+                </div>
+                <div className="inline-actions">
+                  <button className="btn" onClick={openLogFolder} disabled={!userDataRoot}>
+                    打开日志目录
                   </button>
                 </div>
               </div>

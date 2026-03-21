@@ -42,6 +42,7 @@ const PAYLOAD_ROOT =
 const USER_DATA_ROOT = process.env.LONGYIN_USER_DATA_ROOT ?? path.join(APP_ROOT, 'user-data');
 const SETTINGS_PATH = path.join(USER_DATA_ROOT, 'settings.json');
 const STARTUP_LOG_PATH = path.join(USER_DATA_ROOT, 'startup.log');
+const OTA_LOG_PATH = path.join(USER_DATA_ROOT, 'ota-update.log');
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
@@ -376,6 +377,9 @@ async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
   return {
     appVersion: app.getVersion(),
     payloadRoot: PAYLOAD_ROOT,
+    userDataRoot: USER_DATA_ROOT,
+    startupLogPath: STARTUP_LOG_PATH,
+    otaLogPath: OTA_LOG_PATH,
     gameRoot,
     gameRootDetected: Boolean(gameRoot),
     gameInstalled,
@@ -429,14 +433,16 @@ async function applyUpdate(): Promise<OperationResult> {
     throw new Error(update.status ?? '暂无可用更新。');
   }
 
+  await writeStartupLog(`开始应用 OTA 更新：${update.currentVersion} -> ${update.latestVersion}`);
   const { stageRoot } = await stageGitHubUpdate(update.manifest);
-  await launchUpdateHelper(process.pid, stageRoot, APP_ROOT, path.basename(process.execPath));
+  await writeStartupLog(`OTA 暂存目录：${stageRoot}`);
+  await launchUpdateHelper(process.pid, stageRoot, APP_ROOT, path.basename(process.execPath), OTA_LOG_PATH);
   void setTimeout(() => app.quit(), 250);
 
   return {
     ok: true,
-    message: '更新已暂存。复制完成后应用将重新启动。',
-    updatedSnapshot: await buildSnapshot('更新中。')
+    message: '更新包已下载。应用将退出，后台完成替换后会自动重启。',
+    updatedSnapshot: await buildSnapshot('正在下载并应用更新，请等待自动重启。')
   };
 }
 

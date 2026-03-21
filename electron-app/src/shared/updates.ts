@@ -218,31 +218,73 @@ export async function launchUpdateHelper(
   waitPid: number,
   stageRoot: string,
   targetRoot: string,
-  appExecutableName: string
+  appExecutableName: string,
+  logPath: string
 ): Promise<void> {
   const helperRoot = path.join(os.tmpdir(), 'longyin-plus-update', 'helpers');
   await fs.mkdir(helperRoot, { recursive: true });
-  const scriptPath = path.join(helperRoot, `apply-update-${waitPid}.cmd`);
+  const scriptPath = path.join(helperRoot, `apply-update-${waitPid}.ps1`);
+  const ps = (value: string) => value.replace(/'/g, "''");
+  const processName = path.parse(appExecutableName).name;
   const script = [
-    '@echo off',
-    'setlocal',
-    `set "WAIT_PID=${waitPid}"`,
-    `set "SOURCE=${stageRoot}"`,
-    `set "TARGET=${targetRoot}"`,
-    `set "APP_EXE=${appExecutableName}"`,
-    ':wait_loop',
-    'tasklist /fi "pid eq %WAIT_PID%" 2>nul | find "%WAIT_PID%" >nul',
-    'if not errorlevel 1 (',
-    '  timeout /t 1 /nobreak >nul',
-    '  goto wait_loop',
-    ')',
-    'robocopy "%SOURCE%" "%TARGET%" /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP >nul',
-    'start "" "%TARGET%\\%APP_EXE%"',
-    'endlocal'
+    "$ErrorActionPreference = 'Stop'",
+    `$waitPid = ${waitPid}`,
+    `$source = '${ps(stageRoot)}'`,
+    `$target = '${ps(targetRoot)}'`,
+    `$appExe = '${ps(appExecutableName)}'`,
+    `$processName = '${ps(processName)}'`,
+    `$logPath = '${ps(logPath)}'`,
+    '',
+    'function Write-Log([string]$message) {',
+    '  $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"',
+    '  $folder = Split-Path -Parent $logPath',
+    '  if ($folder) { New-Item -ItemType Directory -Force -Path $folder | Out-Null }',
+    '  Add-Content -Path $logPath -Value "[$timestamp] $message"',
+    '}',
+    '',
+    'trap {',
+    '  Write-Log "ERROR: $($_.Exception.Message)"',
+    '  exit 1',
+    '}',
+    '',
+    'Write-Log "OTA helper started. waitPid=$waitPid source=$source target=$target exe=$appExe"',
+    'while (Get-Process -Id $waitPid -ErrorAction SilentlyContinue) {',
+    '  Write-Log "Waiting for main app process $waitPid to exit..."',
+    '  Start-Sleep -Seconds 1',
+    '}',
+    '',
+    '$remainingProcesses = @()',
+    'for ($i = 0; $i -lt 60; $i++) {',
+    '  $remainingProcesses = @(Get-Process -Name $processName -ErrorAction SilentlyContinue)',
+    '  if ($remainingProcesses.Count -eq 0) { break }',
+    '  Write-Log "Waiting for remaining app processes to exit: $($remainingProcesses.Count)"',
+    '  Start-Sleep -Seconds 1',
+    '}',
+    '',
+    '$remainingProcesses = @(Get-Process -Name $processName -ErrorAction SilentlyContinue)',
+    'if ($remainingProcesses.Count -gt 0) {',
+    '  throw "Timed out waiting for remaining app processes to exit."',
+    '}',
+    '',
+    'Write-Log "Copying staged update into target root..."',
+    '$copy = Start-Process -FilePath robocopy.exe -ArgumentList @($source, $target, "/E", "/R:5", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS", "/NP") -PassThru -Wait -WindowStyle Hidden',
+    'Write-Log "Robocopy exit code: $($copy.ExitCode)"',
+    'if ($copy.ExitCode -gt 7) {',
+    '  throw "Robocopy failed with exit code $($copy.ExitCode)."',
+    '}',
+    '',
+    '$exePath = Join-Path $target $appExe',
+    'if (-not (Test-Path -LiteralPath $exePath)) {',
+    '  throw "Updated executable not found: $exePath"',
+    '}',
+    '',
+    'Write-Log "Relaunching updated app..."',
+    'Start-Process -FilePath $exePath -WorkingDirectory $target | Out-Null',
+    'Write-Log "OTA helper completed successfully."'
   ].join('\r\n');
 
-  await fs.writeFile(scriptPath, script, 'ascii');
-  const child = spawn('cmd.exe', ['/c', scriptPath], {
+  await fs.writeFile(scriptPath, script, 'utf8');
+  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true
