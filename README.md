@@ -1,81 +1,107 @@
-# longyin_plus
+# 龙胤立志传 Pro Max 模组仓库
 
-Portable mod repository for `LongYinLiZhiZhuan`.
+这是 `LongYinLiZhiZhuan` 的便携式模组仓库，方便你把模组项目保留在 GitHub 上，而不需要上传游戏本体。
 
-This repository is organized so you can keep the mod project in GitHub without uploading the base game itself.
-
-## What Is In This Repo
+## 仓库内容
 
 - `dist/`
-  Ready-to-install mod payload. The contents of this folder are copied into the game root.
+  可直接安装到游戏根目录的模组载荷，解压后会复制到游戏目录中。
+- `electron-app/`
+  便携式 Electron 启动器与更新器源码，提供新的中文界面，和模组载荷分开打包。
+- `Install.cmd`
+  Windows 一键安装入口。
 - `run_this_first.ps1`
-  Installer script that copies `dist/` into the real game folder.
+  将 `dist/` 复制到真实游戏目录的安装脚本。
 - `run_this_first.cmd`
-  Simple launcher for the installer script.
+  安装脚本的简单启动器。
 - `mod-prototype/`
-  Source files, helper scripts, and control tooling used to build and manage the mods.
+  用于构建和管理模组的源文件、辅助脚本和控制工具。
 - `MODDING-NOTES-1.071F.md`
-  Working notes for the current game version.
+  当前游戏版本的开发记录。
 - `PROJECT-NOTES.md`
-  Preserved local project instructions and repository-specific handling notes.
+  本地保留的项目说明与仓库处理备注。
 
-## What Is Not In This Repo
+## 仓库中不包含
 
-- Base game files
+- 游戏本体文件
 - `LongYinLiZhiZhuan.exe`
 - `LongYinLiZhiZhuan_Data/`
 - `GameAssembly.dll`
-- Steam-managed install content
+- Steam 管理的安装内容
 
-This repo only stores the mod project and the portable mod overlay.
+这个仓库只保存模组项目和便携式模组覆盖层。
 
-## Quick Install
+## 快速安装
 
-1. Install a clean copy of the game.
-2. Download or clone this repository.
-3. Run `run_this_first.cmd` or `run_this_first.ps1`.
-4. Select the folder that contains `LongYinLiZhiZhuan.exe`.
-5. Let the installer copy the contents of `dist/` into the game root.
-6. After install, use `LongYinModControl.ps1` from the game root if you want to adjust settings.
+1. 安装一份干净的游戏。
+2. 下载或克隆本仓库。
+3. 双击 `Install.cmd`。
+4. 如果能自动识别到游戏目录，安装器会把 `dist/` 复制到游戏根目录。
+5. 如果自动识别失败，请手动选择包含 `LongYinLiZhiZhuan.exe` 的文件夹。
+6. 安装完成后，建议启动 `electron-app/` 里的 `龙胤立志传 Pro Max.exe` 使用新的中文界面；旧版 PowerShell 界面仍可通过 `Play.cmd` 兼容启动。
+7. 如果之后需要卸载模组，请运行 `Uninstall.cmd`。
 
-## Manual Install
+## 下载
 
-If you do not want to use the installer script, copy the contents of `dist/` into the game root manually.
+稳定版会发布在 GitHub Releases：
 
-Important:
-Do not copy the `dist` folder itself into the game root.
-Copy the files and folders inside `dist/`.
+- [最新稳定版下载](https://github.com/Zhihong0321/longyin_plus/releases/latest)
 
-## Current Dist Contents
+如果 Releases 还没有显示，也可以使用仓库直链：
 
-The portable payload currently includes:
+- 如果你已经有仓库 ZIP，也可以直接解压后使用；正式对外下载建议使用 Releases 页面里的最新 ZIP。
 
-- BepInEx loader/runtime files
+下载 ZIP 后，解压到任意位置，然后双击 `Install.cmd`。同一个包里也包含 `Uninstall.cmd`，方便后续干净卸载。
+安装器还会清除复制到游戏目录中的 Windows 下载标记，这样首次启动时能减少 Defender 云扫描弹窗。
+
+## 手动安装
+
+如果你不想使用安装脚本，也可以手动把 `dist/` 里的内容复制到游戏根目录。
+
+注意：
+不要把整个 `dist` 文件夹原样复制进去。
+只复制 `dist/` 里面的文件和文件夹。
+
+## 当前 dist 内容
+
+当前便携载荷包含：
+
+- BepInEx 加载器和运行时文件
 - `dotnet/`
-- plugin DLLs and disabled legacy artifacts
-- plugin config files
+- 插件 DLL 和已禁用的旧版产物
+- 插件配置文件
 - `LongYinModControl.ps1`
-- install notes
+- `LongYinModControl.cmd`
+- `LaunchGame.cmd`
+- `Play.cmd`
+  旧版控制入口，主要用于兼容老包。新的中文 Electron 界面是推荐路径。
+- `Uninstall.cmd`
+- `Uninstall.ps1`
+- `steam_appid.txt`
+- 安装说明
 
-## Included Plugins
+## 包含的插件
 
 - `LongYinBattleTurbo`
 - `LongYinGameplayTest`
+- `LongYinHorseStaminaMultiplier`
 - `LongYinQuestSnapshot`
 - `LongYinSkillTalentTracer`
 - `LongYinSkipIntro`
 - `LongYinStaminaLock`
 - `LongYinTraceData`
 
-## Reinstall Workflow
+## 重新安装流程
 
-1. Keep this repository or a zip of it somewhere outside the game folder.
-2. Delete the modded game folder only after this repo backup is safe.
-3. Reinstall a clean game copy.
-4. Run `run_this_first.ps1` again and point it at the clean game folder.
-5. Launch the game.
+1. 先把这个仓库或它的 ZIP 备份到游戏目录外。
+2. 确认备份安全后，再删除已修改过的游戏目录。
+3. 重新安装一份干净的游戏。
+4. 从发布包或已安装的游戏目录中运行 `Uninstall.cmd`。
+5. 下载最新 Release ZIP，再运行一次 `Install.cmd`。
+6. 启动游戏时建议先打开 `Play.cmd`，让控制界面先出现。
 
-## Notes
+## 备注
 
-- This portable package targets game version `1.071F`.
-- Some source-side build scripts in `mod-prototype/` were created against a live local install and may need local path adjustments if you rebuild from source on another machine.
+- 这个便携包目标游戏版本为 `1.071F`。
+- 安装器还会写入 `steam_appid.txt`，游戏 ID 为 `3202030`，这样在新电脑上直接启动也能正常识别 Steam。
+- `mod-prototype/` 里的部分源码脚本是针对本地真实安装环境写的；如果你在另一台机器上重新编译源码，可能需要调整本地路径。

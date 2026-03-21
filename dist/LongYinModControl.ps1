@@ -1,15 +1,66 @@
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+param(
+    [string]$GameRoot = ""
+)
 
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$gameExeName = "LongYinLiZhiZhuan.exe"
+$steamAppId = "3202030"
+
+function Resolve-GameRoot {
+    param(
+        [string]$RequestedPath,
+        [string]$StartPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $resolved = Resolve-Path $RequestedPath -ErrorAction Stop
+        $item = Get-Item $resolved.Path
+
+        if ($item.PSIsContainer) {
+            $candidate = $item.FullName
+        }
+        else {
+            $candidate = Split-Path $item.FullName -Parent
+        }
+
+        if (-not (Test-Path (Join-Path $candidate $gameExeName))) {
+            throw "Could not find $gameExeName in $candidate."
+        }
+
+        return (Resolve-Path $candidate).Path
+    }
+
+    $startLocation = if ([string]::IsNullOrWhiteSpace($StartPath)) { (Get-Location).Path } else { $StartPath }
+    $current = (Resolve-Path $startLocation).Path
+    while ($true) {
+        if (Test-Path (Join-Path $current $gameExeName)) {
+            return $current
+        }
+
+        $parent = Split-Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
+            break
+        }
+
+        $current = $parent
+    }
+
+    throw "Could not locate $gameExeName near $StartPath."
+}
+
+$repoRoot = Resolve-GameRoot -RequestedPath $GameRoot -StartPath $PSScriptRoot
 $configPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.staminalock.cfg"
+$horseStaminaConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.horsestamina.cfg"
 $traceDataConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.tracedata.cfg"
 $skillTalentConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.skilltalenttracer.cfg"
 $battleTurboConfigPath = Join-Path $repoRoot "BepInEx\config\codex.longyin.battleturbo.cfg"
-$gameExePath = Join-Path $repoRoot "LongYinLiZhiZhuan.exe"
+$gameExePath = Join-Path $repoRoot $gameExeName
 $doorstopConfigPath = Join-Path $repoRoot "doorstop_config.ini"
+$steamAppIdPath = Join-Path $repoRoot "steam_appid.txt"
 
 function Ensure-BepInExLoader() {
     if (-not (Test-Path $doorstopConfigPath)) {
@@ -38,11 +89,22 @@ function Ensure-BepInExLoader() {
     }
 
     if ($updated) {
-        Set-Content -Path $doorstopConfigPath -Value $content
+        Set-Content -Path $doorstopConfigPath -Value $content -Encoding ASCII
     }
 }
 
-function Get-DefaultConfigText([bool]$lockStamina, [bool]$revealExtraFogOnMove, [int]$moveRevealRadius, [bool]$revealAllOnStepTile, [bool]$treasureChestChoiceEnabled, [int]$treasureChestChoiceOptions, [int]$treasureChestTotalItems, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [bool]$craftOneDayCrafting, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
+function Ensure-SteamAppIdFile {
+    if (Test-Path $steamAppIdPath) {
+        $currentValue = (Get-Content -Path $steamAppIdPath -Raw).Trim()
+        if ($currentValue -ne $steamAppId) {
+            Copy-Item -Path $steamAppIdPath -Destination "$steamAppIdPath.bak" -Force
+        }
+    }
+
+    Set-Content -Path $steamAppIdPath -Value $steamAppId -Encoding ASCII
+}
+
+function Get-DefaultConfigText([bool]$lockStamina, [bool]$revealExtraFogOnMove, [int]$moveRevealRadius, [bool]$revealAllOnStepTile, [bool]$treasureChestChoiceEnabled, [int]$treasureChestChoiceOptions, [int]$treasureChestTotalItems, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
     return @"
 ## Settings file was created by plugin LongYin Stamina Lock v1.27.0
 ## Plugin GUID: codex.longyin.staminalock
@@ -190,11 +252,6 @@ EnemyDamageTakenMultiplier = $debateEnemyDamageTakenMultiplier
 # Setting type: Boolean
 # Default value: true
 RandomPickUpgrade = $($craftRandomPickUpgrade.ToString().ToLowerInvariant())
-
-## When true, normal crafting only advances 1 in-game day even if the recipe would normally take longer.
-# Setting type: Boolean
-# Default value: true
-OneDayCrafting = $($craftOneDayCrafting.ToString().ToLowerInvariant())
 
 [Drink]
 
@@ -505,7 +562,7 @@ function Set-IniValue([string]$text, [string]$name, [string]$value) {
     return $trimmed + "$name = $value`r`n"
 }
 
-function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [bool]$craftOneDayCrafting, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$skillTalentEnabled, [int]$skillTalentLevelThreshold, [double]$skillTalentTierPointMultiplier, [bool]$skillTalentPlayerOnly, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
+function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPointMultiplier, [int]$battleSpeedMultiplier, [double]$horseBaseSpeedMultiplier, [double]$horseTurboSpeedMultiplier, [double]$horseTurboDurationMultiplier, [double]$horseTurboCooldownMultiplier, [bool]$lockHorseTurboStamina, [double]$horseStaminaMultiplier, [double]$carryWeightCap, [bool]$ignoreCarryWeight, [int]$merchantCarryCash, [int]$luckyHitChancePercent, [int]$extraRelationshipGainChancePercent, [double]$debatePlayerDamageTakenMultiplier, [double]$debateEnemyDamageTakenMultiplier, [bool]$craftRandomPickUpgrade, [double]$drinkPlayerPowerCostMultiplier, [double]$drinkEnemyPowerCostMultiplier, [int]$dailySkillInsightChancePercent, [double]$dailySkillInsightExpPercent, [bool]$dailySkillInsightUseRarityScaling, [double]$dailySkillInsightRealtimeIntervalSeconds, [bool]$skillTalentEnabled, [int]$skillTalentLevelThreshold, [double]$skillTalentTierPointMultiplier, [bool]$skillTalentPlayerOnly, [bool]$traceMode, [bool]$freezeDate, [string]$freezeHotkey, [string]$outsideBattleSpeedHotkey) {
     $expMultiplier = [Math]::Max(1, [Math]::Min(999, $expMultiplier))
     $creationPointMultiplier = [Math]::Max(1, [Math]::Min(999, $creationPointMultiplier))
     $battleSpeedMultiplier = [Math]::Max(1, [Math]::Min(999, $battleSpeedMultiplier))
@@ -513,6 +570,7 @@ function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPoin
     $horseTurboSpeedMultiplier = [Math]::Max(0.01, [Math]::Min(999, $horseTurboSpeedMultiplier))
     $horseTurboDurationMultiplier = [Math]::Max(0.01, [Math]::Min(999, $horseTurboDurationMultiplier))
     $horseTurboCooldownMultiplier = [Math]::Max(0.01, [Math]::Min(999, $horseTurboCooldownMultiplier))
+    $horseStaminaMultiplier = [Math]::Max(0.01, [Math]::Min(999, $horseStaminaMultiplier))
     $carryWeightCap = [Math]::Max(0, [Math]::Min(999999999, $carryWeightCap))
     $merchantCarryCash = [Math]::Max(0, [Math]::Min(999999999, $merchantCarryCash))
     $luckyHitChancePercent = [Math]::Max(0, [Math]::Min(100, $luckyHitChancePercent))
@@ -533,8 +591,20 @@ function Save-Config([bool]$lockStamina, [int]$expMultiplier, [int]$creationPoin
     $treasureChestChoiceEnabled = Get-BoolValue $existingConfigText "TreasureChestChoiceEnabled" $true
     $treasureChestChoiceOptions = [Math]::Max(2, [Math]::Min(10, (Get-IntValue $existingConfigText "TreasureChestChoiceOptions" 3)))
     $treasureChestTotalItems = [Math]::Max(1, [Math]::Min(20, (Get-IntValue $existingConfigText "TreasureChestTotalItems" 2)))
-    $text = Get-DefaultConfigText $lockStamina $revealExtraFogOnMove $moveRevealRadius $revealAllOnStepTile $treasureChestChoiceEnabled $treasureChestChoiceOptions $treasureChestTotalItems $expMultiplier $creationPointMultiplier $battleSpeedMultiplier $horseBaseSpeedMultiplier $horseTurboSpeedMultiplier $horseTurboDurationMultiplier $horseTurboCooldownMultiplier $lockHorseTurboStamina $carryWeightCap $ignoreCarryWeight $merchantCarryCash $luckyHitChancePercent $extraRelationshipGainChancePercent $debatePlayerDamageTakenMultiplier $debateEnemyDamageTakenMultiplier $craftRandomPickUpgrade $craftOneDayCrafting $drinkPlayerPowerCostMultiplier $drinkEnemyPowerCostMultiplier $dailySkillInsightChancePercent $dailySkillInsightExpPercent $dailySkillInsightUseRarityScaling $dailySkillInsightRealtimeIntervalSeconds $traceMode $freezeDate $freezeHotkey $outsideBattleSpeedHotkey
+    $text = Get-DefaultConfigText $lockStamina $revealExtraFogOnMove $moveRevealRadius $revealAllOnStepTile $treasureChestChoiceEnabled $treasureChestChoiceOptions $treasureChestTotalItems $expMultiplier $creationPointMultiplier $battleSpeedMultiplier $horseBaseSpeedMultiplier $horseTurboSpeedMultiplier $horseTurboDurationMultiplier $horseTurboCooldownMultiplier $lockHorseTurboStamina $carryWeightCap $ignoreCarryWeight $merchantCarryCash $luckyHitChancePercent $extraRelationshipGainChancePercent $debatePlayerDamageTakenMultiplier $debateEnemyDamageTakenMultiplier $craftRandomPickUpgrade $drinkPlayerPowerCostMultiplier $drinkEnemyPowerCostMultiplier $dailySkillInsightChancePercent $dailySkillInsightExpPercent $dailySkillInsightUseRarityScaling $dailySkillInsightRealtimeIntervalSeconds $traceMode $freezeDate $freezeHotkey $outsideBattleSpeedHotkey
     Set-Content -Path $configPath -Value $text -Encoding ASCII
+    $horseText = @"
+## Settings file was created by plugin LongYin Horse Stamina Multiplier v1.0.0
+## Plugin GUID: codex.longyin.horsestamina
+
+[WorldMapHorse]
+
+## Scales horse stamina drain and recovery. Values above 1 make the horse last longer and refill more slowly.
+# Setting type: Single
+# Default value: 1
+StaminaMultiplier = $horseStaminaMultiplier
+"@
+    Set-Content -Path $horseStaminaConfigPath -Value $horseText -Encoding ASCII
     Set-Content -Path $traceDataConfigPath -Value (Get-TraceDataDefaultConfigText $traceMode) -Encoding ASCII
     $skillTalentText = @"
 ## Settings file was created by plugin LongYin Skill Talent Grant v1.0.0
@@ -622,6 +692,8 @@ $horseTurboSpeedMultiplierValue = Get-FloatValue $configText "TurboSpeedMultipli
 $horseTurboDurationMultiplierValue = Get-FloatValue $configText "TurboDurationMultiplier" 1
 $horseTurboCooldownMultiplierValue = Get-FloatValue $configText "TurboCooldownMultiplier" 1
 $lockHorseTurboStaminaValue = Get-BoolValue $configText "LockTurboStamina" $true
+$horseStaminaConfigText = if (Test-Path $horseStaminaConfigPath) { Get-Content -Path $horseStaminaConfigPath -Raw } else { "" }
+$horseStaminaMultiplierValue = Get-FloatValue $horseStaminaConfigText "StaminaMultiplier" 1
 $carryWeightCapValue = Get-FloatValue $configText "CarryWeightCap" 100000
 $ignoreCarryWeightValue = Get-BoolValue $configText "IgnoreCarryWeight" $false
 $merchantCarryCashValue = Get-IntValue $configText "MerchantCarryCash" 100000
@@ -630,7 +702,6 @@ $extraRelationshipGainChancePercentValue = Get-IntValue $configText "ExtraRelati
 $debatePlayerDamageTakenMultiplierValue = Get-FloatValue $configText "PlayerDamageTakenMultiplier" 1
 $debateEnemyDamageTakenMultiplierValue = Get-FloatValue $configText "EnemyDamageTakenMultiplier" 1
 $craftRandomPickUpgradeValue = Get-BoolValue $configText "RandomPickUpgrade" $true
-$craftOneDayCraftingValue = Get-BoolValue $configText "OneDayCrafting" $true
 $drinkPlayerPowerCostMultiplierValue = Get-FloatValue $configText "PlayerPowerCostMultiplier" 1
 $drinkEnemyPowerCostMultiplierValue = Get-FloatValue $configText "EnemyPowerCostMultiplier" 1
 $dailySkillInsightChancePercentValue = Get-IntValue $configText "HitChancePercent" 0
@@ -652,7 +723,7 @@ $availableHotkeys = @("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10
 $availableBattleTurboHotkeys = @("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Insert", "Home", "PageUp", "Delete", "End", "PageDown", "Pause", "BackQuote", "Mouse3", "Mouse4", "Mouse5")
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "LongYin Mod Control"
+$form.Text = "龙胤立志传 Pro Max"
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
@@ -661,7 +732,7 @@ $form.ClientSize = New-Object System.Drawing.Size(640, 760)
 $form.BackColor = [System.Drawing.Color]::FromArgb(248, 244, 236)
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = "LongYin Mod Control"
+$title.Text = "龙胤立志传 Pro Max"
 $title.Font = New-Object System.Drawing.Font("Segoe UI", 18, [System.Drawing.FontStyle]::Bold)
 $title.AutoSize = $true
 $title.Location = New-Object System.Drawing.Point(22, 16)
@@ -920,18 +991,43 @@ $horseTurboCooldownHint.AutoSize = $true
 $horseTurboCooldownHint.Location = New-Object System.Drawing.Point(150, 662)
 $gameplayGroup.Controls.Add($horseTurboCooldownHint)
 
+$horseStaminaLabel = New-Object System.Windows.Forms.Label
+$horseStaminaLabel.Text = "Stamina multiplier"
+$horseStaminaLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$horseStaminaLabel.AutoSize = $true
+$horseStaminaLabel.Location = New-Object System.Drawing.Point(18, 706)
+$gameplayGroup.Controls.Add($horseStaminaLabel)
+
+$horseStaminaBox = New-Object System.Windows.Forms.NumericUpDown
+$horseStaminaBox.Minimum = [decimal]0.01
+$horseStaminaBox.Maximum = [decimal]999
+$horseStaminaBox.DecimalPlaces = 2
+$horseStaminaBox.Increment = [decimal]0.25
+$horseStaminaBox.Value = [decimal][Math]::Max(0.01, $horseStaminaMultiplierValue)
+$horseStaminaBox.Font = New-Object System.Drawing.Font("Segoe UI", 11)
+$horseStaminaBox.Location = New-Object System.Drawing.Point(18, 734)
+$horseStaminaBox.Size = New-Object System.Drawing.Size(120, 34)
+$gameplayGroup.Controls.Add($horseStaminaBox)
+
+$horseStaminaHint = New-Object System.Windows.Forms.Label
+$horseStaminaHint.Text = "Values above 1 make the horse last longer."
+$horseStaminaHint.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
+$horseStaminaHint.AutoSize = $true
+$horseStaminaHint.Location = New-Object System.Drawing.Point(150, 738)
+$gameplayGroup.Controls.Add($horseStaminaHint)
+
 $inventorySectionLabel = New-Object System.Windows.Forms.Label
 $inventorySectionLabel.Text = "Inventory weight"
 $inventorySectionLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
 $inventorySectionLabel.AutoSize = $true
-$inventorySectionLabel.Location = New-Object System.Drawing.Point(18, 706)
+$inventorySectionLabel.Location = New-Object System.Drawing.Point(18, 780)
 $gameplayGroup.Controls.Add($inventorySectionLabel)
 
 $ignoreCarryWeightCheckbox = New-Object System.Windows.Forms.CheckBox
 $ignoreCarryWeightCheckbox.Text = "Ignore carry weight"
 $ignoreCarryWeightCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 $ignoreCarryWeightCheckbox.AutoSize = $true
-$ignoreCarryWeightCheckbox.Location = New-Object System.Drawing.Point(146, 704)
+$ignoreCarryWeightCheckbox.Location = New-Object System.Drawing.Point(146, 778)
 $ignoreCarryWeightCheckbox.Checked = $ignoreCarryWeightValue
 $gameplayGroup.Controls.Add($ignoreCarryWeightCheckbox)
 
@@ -939,7 +1035,7 @@ $carryWeightCapLabel = New-Object System.Windows.Forms.Label
 $carryWeightCapLabel.Text = "Carry-weight cap"
 $carryWeightCapLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 $carryWeightCapLabel.AutoSize = $true
-$carryWeightCapLabel.Location = New-Object System.Drawing.Point(18, 740)
+$carryWeightCapLabel.Location = New-Object System.Drawing.Point(18, 814)
 $gameplayGroup.Controls.Add($carryWeightCapLabel)
 
 $carryWeightCapBox = New-Object System.Windows.Forms.NumericUpDown
@@ -950,7 +1046,7 @@ $carryWeightCapBox.ThousandsSeparator = $true
 $carryWeightCapBox.Increment = 1000
 $carryWeightCapBox.Value = [decimal][Math]::Max(0, [Math]::Min(999999999, $carryWeightCapValue))
 $carryWeightCapBox.Font = New-Object System.Drawing.Font("Segoe UI", 11)
-$carryWeightCapBox.Location = New-Object System.Drawing.Point(18, 768)
+$carryWeightCapBox.Location = New-Object System.Drawing.Point(18, 842)
 $carryWeightCapBox.Size = New-Object System.Drawing.Size(160, 34)
 $gameplayGroup.Controls.Add($carryWeightCapBox)
 
@@ -958,21 +1054,21 @@ $carryWeightCapHint = New-Object System.Windows.Forms.Label
 $carryWeightCapHint.Text = "Player bag max weight is raised to at least this value. 0 = off."
 $carryWeightCapHint.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
 $carryWeightCapHint.Size = New-Object System.Drawing.Size(300, 40)
-$carryWeightCapHint.Location = New-Object System.Drawing.Point(190, 770)
+$carryWeightCapHint.Location = New-Object System.Drawing.Point(190, 844)
 $gameplayGroup.Controls.Add($carryWeightCapHint)
 
 $craftSectionLabel = New-Object System.Windows.Forms.Label
 $craftSectionLabel.Text = "Crafting"
 $craftSectionLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
 $craftSectionLabel.AutoSize = $true
-$craftSectionLabel.Location = New-Object System.Drawing.Point(18, 826)
+$craftSectionLabel.Location = New-Object System.Drawing.Point(18, 890)
 $gameplayGroup.Controls.Add($craftSectionLabel)
 
 $craftRandomPickUpgradeCheckbox = New-Object System.Windows.Forms.CheckBox
 $craftRandomPickUpgradeCheckbox.Text = "Picked result +1 big tier reroll"
 $craftRandomPickUpgradeCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 $craftRandomPickUpgradeCheckbox.AutoSize = $true
-$craftRandomPickUpgradeCheckbox.Location = New-Object System.Drawing.Point(18, 854)
+$craftRandomPickUpgradeCheckbox.Location = New-Object System.Drawing.Point(18, 918)
 $craftRandomPickUpgradeCheckbox.Checked = $craftRandomPickUpgradeValue
 $gameplayGroup.Controls.Add($craftRandomPickUpgradeCheckbox)
 
@@ -980,22 +1076,14 @@ $craftRandomPickUpgradeHint = New-Object System.Windows.Forms.Label
 $craftRandomPickUpgradeHint.Text = "Uses your picked result as the base item, then rerolls toward the next big tier. If no higher big tier is found, it keeps the original item."
 $craftRandomPickUpgradeHint.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
 $craftRandomPickUpgradeHint.Size = New-Object System.Drawing.Size(380, 40)
-$craftRandomPickUpgradeHint.Location = New-Object System.Drawing.Point(38, 882)
+$craftRandomPickUpgradeHint.Location = New-Object System.Drawing.Point(38, 946)
 $gameplayGroup.Controls.Add($craftRandomPickUpgradeHint)
-
-$craftOneDayCraftingCheckbox = New-Object System.Windows.Forms.CheckBox
-$craftOneDayCraftingCheckbox.Text = "Normal crafting always costs 1 day"
-$craftOneDayCraftingCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-$craftOneDayCraftingCheckbox.AutoSize = $true
-$craftOneDayCraftingCheckbox.Location = New-Object System.Drawing.Point(18, 930)
-$craftOneDayCraftingCheckbox.Checked = $craftOneDayCraftingValue
-$gameplayGroup.Controls.Add($craftOneDayCraftingCheckbox)
 
 $merchantCashLabel = New-Object System.Windows.Forms.Label
 $merchantCashLabel.Text = "Merchant cash floor"
 $merchantCashLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 $merchantCashLabel.AutoSize = $true
-$merchantCashLabel.Location = New-Object System.Drawing.Point(18, 968)
+$merchantCashLabel.Location = New-Object System.Drawing.Point(18, 1032)
 $gameplayGroup.Controls.Add($merchantCashLabel)
 
 $merchantCashBox = New-Object System.Windows.Forms.NumericUpDown
@@ -1005,7 +1093,7 @@ $merchantCashBox.ThousandsSeparator = $true
 $merchantCashBox.Increment = 1000
 $merchantCashBox.Value = [decimal][Math]::Max(0, [Math]::Min(999999999, $merchantCarryCashValue))
 $merchantCashBox.Font = New-Object System.Drawing.Font("Segoe UI", 11)
-$merchantCashBox.Location = New-Object System.Drawing.Point(18, 996)
+$merchantCashBox.Location = New-Object System.Drawing.Point(18, 1060)
 $merchantCashBox.Size = New-Object System.Drawing.Size(160, 34)
 $gameplayGroup.Controls.Add($merchantCashBox)
 
@@ -1013,7 +1101,7 @@ $merchantCashHint = New-Object System.Windows.Forms.Label
 $merchantCashHint.Text = "Each shop merchant gets at least this much cash while trading. 0 = off."
 $merchantCashHint.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
 $merchantCashHint.Size = New-Object System.Drawing.Size(300, 40)
-$merchantCashHint.Location = New-Object System.Drawing.Point(190, 998)
+$merchantCashHint.Location = New-Object System.Drawing.Point(190, 1062)
 $gameplayGroup.Controls.Add($merchantCashHint)
 
 $systemGroup = New-Object System.Windows.Forms.GroupBox
@@ -1417,6 +1505,7 @@ $saveAction = {
         ([double](Get-NumericValue $horseTurboDurationBox)) `
         ([double](Get-NumericValue $horseTurboCooldownBox)) `
         $horseTurboStaminaCheckbox.Checked `
+        ([double](Get-NumericValue $horseStaminaBox)) `
         ([double](Get-NumericValue $carryWeightCapBox)) `
         $ignoreCarryWeightCheckbox.Checked `
         ([int](Get-NumericValue $merchantCashBox)) `
@@ -1425,7 +1514,6 @@ $saveAction = {
         ([double](Get-NumericValue $debatePlayerDamageBox)) `
         ([double](Get-NumericValue $debateEnemyDamageBox)) `
         $craftRandomPickUpgradeCheckbox.Checked `
-        $craftOneDayCraftingCheckbox.Checked `
         ([double](Get-NumericValue $drinkPlayerPowerBox)) `
         ([double](Get-NumericValue $drinkEnemyPowerBox)) `
         ([int](Get-NumericValue $dailyInsightChanceBox)) `
@@ -1448,11 +1536,12 @@ $saveAction = {
 
 $launchAction = {
     if (-not (Test-Path $gameExePath)) {
-        [System.Windows.Forms.MessageBox]::Show("Game executable not found at:`r`n$gameExePath", "LongYin Mod Control")
+[System.Windows.Forms.MessageBox]::Show("未找到游戏可执行文件：`r`n$gameExePath", "龙胤立志传 Pro Max")
         return
     }
 
     Ensure-BepInExLoader
+    Ensure-SteamAppIdFile
     Start-Process -FilePath $gameExePath -WorkingDirectory $repoRoot | Out-Null
     Set-Status $statusLabel "Launched"
 }

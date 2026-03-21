@@ -7,10 +7,19 @@ $ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
 
-$repoRoot = $PSScriptRoot
-$distRoot = Join-Path $repoRoot "dist"
 $gameExeName = "LongYinLiZhiZhuan.exe"
 $steamAppId = "3202030"
+
+function Assert-PathExists {
+    param(
+        [string]$Path,
+        [string]$Label
+    )
+
+    if (-not (Test-Path $Path)) {
+        throw "$Label not found: $Path"
+    }
+}
 
 function Test-GameRoot {
     param([string]$Path)
@@ -104,13 +113,14 @@ function Get-AutoDetectedGameRoot {
 
     return $null
 }
+
 function Get-SelectedGameRoot {
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
     $dialog.Description = "Select the game folder that contains LongYinLiZhiZhuan.exe"
     $dialog.ShowNewFolderButton = $false
 
     if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
-        throw "Installation canceled."
+        throw "Uninstall canceled."
     }
 
     return $dialog.SelectedPath
@@ -134,6 +144,10 @@ function Resolve-GameRoot {
         return (Resolve-Path $candidate).Path
     }
 
+    if (Test-GameRoot $PSScriptRoot) {
+        return (Resolve-Path $PSScriptRoot).Path
+    }
+
     $autoDetectedRoot = Get-AutoDetectedGameRoot
     if (-not [string]::IsNullOrWhiteSpace($autoDetectedRoot)) {
         return $autoDetectedRoot
@@ -144,18 +158,7 @@ function Resolve-GameRoot {
     return $selected.Path
 }
 
-function Assert-PathExists {
-    param(
-        [string]$Path,
-        [string]$Label
-    )
-
-    if (-not (Test-Path $Path)) {
-        throw "$Label not found: $Path"
-    }
-}
-
-function Confirm-Install {
+function Confirm-Uninstall {
     param([string]$TargetPath)
 
     if ($Force) {
@@ -166,58 +169,80 @@ function Confirm-Install {
     Write-Host "Target game folder:"
     Write-Host $TargetPath
     Write-Host ""
-    $answer = Read-Host "Type INSTALL to copy dist into this folder"
-    if ($answer -ne "INSTALL") {
-        throw "Installation canceled."
+    $answer = Read-Host "Type UNINSTALL to remove the mod from this folder"
+    if ($answer -ne "UNINSTALL") {
+        throw "Uninstall canceled."
     }
 }
 
-function Ensure-SteamAppId {
+function Remove-PathIfPresent {
+    param([string]$Path)
+
+    if (Test-Path $Path) {
+        Remove-Item -Path $Path -Recurse -Force
+    }
+}
+
+function Remove-MatchingFiles {
+    param(
+        [string]$Root,
+        [string[]]$Patterns
+    )
+
+    foreach ($pattern in $Patterns) {
+        Get-ChildItem -Path $Root -Force -File -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force
+    }
+}
+
+function Restore-SteamAppId {
     param([string]$TargetRoot)
 
     $steamAppIdPath = Join-Path $TargetRoot "steam_appid.txt"
+    $backupPath = "$steamAppIdPath.bak"
+
+    if (Test-Path $backupPath) {
+        Copy-Item -Path $backupPath -Destination $steamAppIdPath -Force
+        Remove-Item -Path $backupPath -Force
+        return
+    }
 
     if (Test-Path $steamAppIdPath) {
-        $currentValue = (Get-Content -Path $steamAppIdPath -Raw).Trim()
-        if ($currentValue -ne $steamAppId) {
-            Copy-Item -Path $steamAppIdPath -Destination "$steamAppIdPath.bak" -Force
-        }
-    }
-
-    Set-Content -Path $steamAppIdPath -Value $steamAppId -Encoding ASCII
-}
-
-function Unblock-InstalledFiles {
-    param([string]$TargetRoot)
-
-    Get-ChildItem -Path $TargetRoot -Recurse -File | ForEach-Object {
-        try {
-            Unblock-File -Path $_.FullName
-        }
-        catch {
-            # Some files may not expose a zone stream; skip them quietly.
-        }
+        Remove-Item -Path $steamAppIdPath -Force
     }
 }
-
-Assert-PathExists -Path $distRoot -Label "dist folder"
 
 $targetRoot = Resolve-GameRoot -RequestedPath $GameRoot
-$targetExe = Join-Path $targetRoot $gameExeName
-
-Assert-PathExists -Path $targetExe -Label $gameExeName
-Confirm-Install -TargetPath $targetRoot
+Assert-PathExists -Path (Join-Path $targetRoot $gameExeName) -Label $gameExeName
+Confirm-Uninstall -TargetPath $targetRoot
 
 Write-Host ""
-Write-Host "Copying dist payload into:"
+Write-Host "Removing mod files from:"
 Write-Host $targetRoot
 Write-Host ""
 
-Get-ChildItem -Path $distRoot -Force | Where-Object { $_.Name -notlike "*.zip" } | ForEach-Object {
-    Copy-Item -Path $_.FullName -Destination $targetRoot -Recurse -Force
-}
-Ensure-SteamAppId -TargetRoot $targetRoot
-Unblock-InstalledFiles -TargetRoot $targetRoot
+Restore-SteamAppId -TargetRoot $targetRoot
 
-Write-Host "Install complete."
-Write-Host "You can now run LongYinModControl.cmd from the game root."
+Remove-PathIfPresent -Path (Join-Path $targetRoot "BepInEx")
+Remove-PathIfPresent -Path (Join-Path $targetRoot "dotnet")
+
+Remove-MatchingFiles -Root $targetRoot -Patterns @(
+    ".doorstop_version",
+    "doorstop_config.ini",
+    "winhttp.dll",
+    "LaunchGame.cmd",
+    "LongYinModControl.cmd",
+    "LongYinModControl.ps1",
+    "Play.cmd",
+    "Install.cmd",
+    "Uninstall.cmd",
+    "Uninstall.ps1",
+    "run_this_first.cmd",
+    "run_this_first.ps1",
+    "README.md",
+    "安装与运行说明.md",
+    "LongYin-Mod-Portable-*.zip",
+    "LongYinPlus-InstallBundle-*.zip"
+)
+
+Write-Host "Uninstall complete."
+Write-Host "The game folder now contains only the remaining base-game files and any user data you already had."

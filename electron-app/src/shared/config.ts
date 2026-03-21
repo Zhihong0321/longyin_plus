@@ -1,0 +1,679 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { GAME_EXE_NAME, STEAM_APP_ID, VisibleSettings } from './types';
+
+const MAIN_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.staminalock.cfg');
+const HORSE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.horsestamina.cfg');
+const TRACE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.tracedata.cfg');
+const SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalenttracer.cfg');
+const BATTLE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.battleturbo.cfg');
+const DOORSTOP_NAME = 'doorstop_config.ini';
+const STEAM_APP_ID_NAME = 'steam_appid.txt';
+
+interface MainConfigHidden {
+  revealExtraFogOnMove: boolean;
+  moveRevealRadius: number;
+  revealAllOnStepTile: boolean;
+  treasureChestChoiceEnabled: boolean;
+  treasureChestChoiceOptions: number;
+  treasureChestTotalItems: number;
+}
+
+interface TraceConfigHidden {
+  enabled: boolean;
+  forceAutoContinueEnabled: boolean;
+  forceAutoContinueHotkey: string;
+  emergencyUnstuckHotkey: string;
+  fastForwardSafetyEnabled: boolean;
+  fastForwardStuckFrames: number;
+  treasureFlowEnabled: boolean;
+}
+
+interface BattleConfigHidden {
+  attackDelayMultiplier: number;
+  entryDelayMultiplier: number;
+  maxUnitMoveOneGridTime: number;
+  forcedAiWaitTime: number;
+  disableCameraFocusTweens: boolean;
+  disableFocusAnimations: boolean;
+  disableHighlightAnimations: boolean;
+  disableHitAnimations: boolean;
+  disableSkillSpecialEffects: boolean;
+  disableBattleVoices: boolean;
+  traceMode: boolean;
+}
+
+const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
+  lockStamina: true,
+  expMultiplier: 1,
+  creationPointMultiplier: 1,
+  horseBaseSpeedMultiplier: 1,
+  horseTurboSpeedMultiplier: 1,
+  horseTurboDurationMultiplier: 1,
+  horseTurboCooldownMultiplier: 1,
+  lockHorseTurboStamina: true,
+  horseStaminaMultiplier: 1,
+  carryWeightCap: 100000,
+  ignoreCarryWeight: false,
+  merchantCarryCash: 100000,
+  luckyHitChancePercent: 0,
+  extraRelationshipGainChancePercent: 0,
+  debatePlayerDamageTakenMultiplier: 1,
+  debateEnemyDamageTakenMultiplier: 1,
+  craftRandomPickUpgrade: true,
+  drinkPlayerPowerCostMultiplier: 1,
+  drinkEnemyPowerCostMultiplier: 1,
+  dailySkillInsightChancePercent: 0,
+  dailySkillInsightExpPercent: 5,
+  dailySkillInsightUseRarityScaling: true,
+  dailySkillInsightRealtimeIntervalSeconds: 0,
+  skillTalentEnabled: true,
+  skillTalentLevelThreshold: 10,
+  skillTalentTierPointMultiplier: 2,
+  skillTalentPlayerOnly: true,
+  dialogMonthlyLimitMultiplier: 3,
+  traceMode: false,
+  freezeDate: false,
+  freezeHotkey: 'F1',
+  outsideBattleSpeedHotkey: 'F11',
+  battleTurboEnabled: true,
+  battleTurboHotkey: 'F8'
+};
+
+const DEFAULT_MAIN_HIDDEN: MainConfigHidden = {
+  revealExtraFogOnMove: true,
+  moveRevealRadius: 2,
+  revealAllOnStepTile: true,
+  treasureChestChoiceEnabled: true,
+  treasureChestChoiceOptions: 3,
+  treasureChestTotalItems: 2
+};
+
+const DEFAULT_TRACE_HIDDEN: TraceConfigHidden = {
+  enabled: false,
+  forceAutoContinueEnabled: true,
+  forceAutoContinueHotkey: 'P',
+  emergencyUnstuckHotkey: 'F12',
+  fastForwardSafetyEnabled: true,
+  fastForwardStuckFrames: 180,
+  treasureFlowEnabled: false
+};
+
+const DEFAULT_BATTLE_HIDDEN: BattleConfigHidden = {
+  attackDelayMultiplier: 0.1,
+  entryDelayMultiplier: 0.05,
+  maxUnitMoveOneGridTime: 0.03,
+  forcedAiWaitTime: 0,
+  disableCameraFocusTweens: true,
+  disableFocusAnimations: true,
+  disableHighlightAnimations: true,
+  disableHitAnimations: false,
+  disableSkillSpecialEffects: true,
+  disableBattleVoices: true,
+  traceMode: false
+};
+
+function boolText(value: boolean): string {
+  return value ? 'true' : 'false';
+}
+
+function formatFloat(value: number, digits = 2): string {
+  return Number.parseFloat(value.toFixed(digits)).toString();
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (Number.isNaN(value)) {
+    return min;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeHotkey(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : fallback;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeNewlines(text: string): string {
+  return text.replace(/\r?\n/g, '\r\n').replace(/\r{2,}/g, '\r\n');
+}
+
+async function readTextIfExists(filePath: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(filePath, 'utf8');
+  }
+  catch {
+    return undefined;
+  }
+}
+
+async function writeTextFile(filePath: string, text: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, normalizeNewlines(text), 'ascii');
+}
+
+export function getGamePaths(gameRoot: string) {
+  return {
+    gameExePath: path.join(gameRoot, GAME_EXE_NAME),
+    steamAppIdPath: path.join(gameRoot, STEAM_APP_ID_NAME),
+    doorstopConfigPath: path.join(gameRoot, DOORSTOP_NAME),
+    mainConfigPath: path.join(gameRoot, MAIN_CONFIG_NAME),
+    horseConfigPath: path.join(gameRoot, HORSE_CONFIG_NAME),
+    traceConfigPath: path.join(gameRoot, TRACE_CONFIG_NAME),
+    skillConfigPath: path.join(gameRoot, SKILL_CONFIG_NAME),
+    battleConfigPath: path.join(gameRoot, BATTLE_CONFIG_NAME)
+  };
+}
+
+function readBool(text: string | undefined, key: string, fallback: boolean): boolean {
+  if (!text) {
+    return fallback;
+  }
+
+  const match = text.match(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*(true|false)\\s*$`, 'mi'));
+  return match ? match[1].toLowerCase() === 'true' : fallback;
+}
+
+function readInt(text: string | undefined, key: string, fallback: number): number {
+  if (!text) {
+    return fallback;
+  }
+
+  const match = text.match(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*(-?\\d+)\\s*$`, 'mi'));
+  return match ? Number.parseInt(match[1], 10) : fallback;
+}
+
+function readFloat(text: string | undefined, key: string, fallback: number): number {
+  if (!text) {
+    return fallback;
+  }
+
+  const match = text.match(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*(-?\\d+(?:\\.\\d+)?)\\s*$`, 'mi'));
+  return match ? Number.parseFloat(match[1]) : fallback;
+}
+
+function readString(text: string | undefined, key: string, fallback: string): string {
+  if (!text) {
+    return fallback;
+  }
+
+  const match = text.match(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*(.+?)\\s*$`, 'mi'));
+  return match ? match[1].trim() : fallback;
+}
+
+function upsertIniValue(text: string, key: string, value: string): string {
+  const pattern = new RegExp(`^(\\s*${escapeRegex(key)}\\s*=\\s*).*$`, 'mi');
+  const match = text.match(pattern);
+  if (match && typeof match.index === 'number') {
+    return `${text.slice(0, match.index)}${match[1]}${value}${text.slice(match.index + match[0].length)}`;
+  }
+
+  const suffix = text.endsWith('\n') || text.endsWith('\r') ? '' : '\r\n';
+  return `${text}${suffix}${key} = ${value}\r\n`;
+}
+
+function buildMainTemplate(settings = DEFAULT_VISIBLE_SETTINGS, hidden = DEFAULT_MAIN_HIDDEN): string {
+  return normalizeNewlines(`
+## Settings file was created by LongYinPlus Electron
+## Plugin GUID: codex.longyin.staminalock
+
+[Debug]
+TraceMode = ${boolText(settings.traceMode)}
+
+[Exploration]
+LockStamina = ${boolText(settings.lockStamina)}
+RevealExtraFogOnMove = ${boolText(hidden.revealExtraFogOnMove)}
+MoveRevealRadius = ${hidden.moveRevealRadius}
+RevealAllOnStepTile = ${boolText(hidden.revealAllOnStepTile)}
+TreasureChestChoiceEnabled = ${boolText(hidden.treasureChestChoiceEnabled)}
+TreasureChestChoiceOptions = ${hidden.treasureChestChoiceOptions}
+TreasureChestTotalItems = ${hidden.treasureChestTotalItems}
+
+[ReadBook]
+ExpMultiplier = ${settings.expMultiplier}
+
+[CharacterCreation]
+PointMultiplier = ${settings.creationPointMultiplier}
+
+[Battle]
+SpeedMultiplier = 2
+
+[WorldMapHorse]
+BaseSpeedMultiplier = ${formatFloat(settings.horseBaseSpeedMultiplier)}
+TurboSpeedMultiplier = ${formatFloat(settings.horseTurboSpeedMultiplier)}
+TurboDurationMultiplier = ${formatFloat(settings.horseTurboDurationMultiplier)}
+TurboCooldownMultiplier = ${formatFloat(settings.horseTurboCooldownMultiplier)}
+LockTurboStamina = ${boolText(settings.lockHorseTurboStamina)}
+
+[Inventory]
+CarryWeightCap = ${formatFloat(settings.carryWeightCap)}
+IgnoreCarryWeight = ${boolText(settings.ignoreCarryWeight)}
+
+[Commerce]
+MerchantCarryCash = ${settings.merchantCarryCash}
+LuckyHitChancePercent = ${settings.luckyHitChancePercent}
+ExtraRelationshipGainChancePercent = ${settings.extraRelationshipGainChancePercent}
+
+[Debate]
+PlayerDamageTakenMultiplier = ${formatFloat(settings.debatePlayerDamageTakenMultiplier)}
+EnemyDamageTakenMultiplier = ${formatFloat(settings.debateEnemyDamageTakenMultiplier)}
+
+[Craft]
+RandomPickUpgrade = ${boolText(settings.craftRandomPickUpgrade)}
+
+[Drink]
+PlayerPowerCostMultiplier = ${formatFloat(settings.drinkPlayerPowerCostMultiplier)}
+EnemyPowerCostMultiplier = ${formatFloat(settings.drinkEnemyPowerCostMultiplier)}
+
+[DailySkillInsight]
+HitChancePercent = ${settings.dailySkillInsightChancePercent}
+ExpPercent = ${formatFloat(settings.dailySkillInsightExpPercent, 1)}
+UseRarityScaling = ${boolText(settings.dailySkillInsightUseRarityScaling)}
+RealtimeIntervalSeconds = ${formatFloat(settings.dailySkillInsightRealtimeIntervalSeconds, 1)}
+
+[Systems]
+FreezeDate = ${boolText(settings.freezeDate)}
+ToggleFreezeDateHotkey = ${settings.freezeHotkey}
+CycleOutsideBattleSpeedHotkey = ${settings.outsideBattleSpeedHotkey}
+`).trimStart();
+}
+
+function buildTraceTemplate(hidden = DEFAULT_TRACE_HIDDEN, monthlyLimit = DEFAULT_VISIBLE_SETTINGS.dialogMonthlyLimitMultiplier): string {
+  return normalizeNewlines(`
+## Settings file was created by LongYinPlus Electron
+## Plugin GUID: codex.longyin.tracedata
+
+[DialogFlow]
+Enabled = ${boolText(hidden.enabled)}
+MonthlyLimitMultiplier = ${formatFloat(monthlyLimit, 1)}
+ForceAutoContinueEnabled = ${boolText(hidden.forceAutoContinueEnabled)}
+ForceAutoContinueHotkey = ${hidden.forceAutoContinueHotkey}
+EmergencyUnstuckHotkey = ${hidden.emergencyUnstuckHotkey}
+FastForwardSafetyEnabled = ${boolText(hidden.fastForwardSafetyEnabled)}
+FastForwardStuckFrames = ${hidden.fastForwardStuckFrames}
+
+[TreasureFlow]
+Enabled = ${boolText(hidden.treasureFlowEnabled)}
+`).trimStart();
+}
+
+function buildSkillTemplate(settings = DEFAULT_VISIBLE_SETTINGS): string {
+  return normalizeNewlines(`
+## Settings file was created by LongYinPlus Electron
+## Plugin GUID: codex.longyin.skilltalenttracer
+
+[SkillTalent]
+Enabled = ${boolText(settings.skillTalentEnabled)}
+LevelThreshold = ${settings.skillTalentLevelThreshold}
+TierPointMultiplier = ${formatFloat(settings.skillTalentTierPointMultiplier, 2)}
+PlayerOnly = ${boolText(settings.skillTalentPlayerOnly)}
+`).trimStart();
+}
+
+function buildBattleTemplate(hidden = DEFAULT_BATTLE_HIDDEN, settings = DEFAULT_VISIBLE_SETTINGS): string {
+  return normalizeNewlines(`
+## Settings file was created by LongYinPlus Electron
+## Plugin GUID: codex.longyin.battleturbo
+
+[Audio]
+DisableBattleVoices = ${boolText(hidden.disableBattleVoices)}
+
+[Debug]
+TraceMode = ${boolText(hidden.traceMode)}
+
+[General]
+Enabled = ${boolText(settings.battleTurboEnabled)}
+ToggleHotkey = ${settings.battleTurboHotkey}
+
+[Timing]
+AttackDelayMultiplier = ${formatFloat(hidden.attackDelayMultiplier, 2)}
+EntryDelayMultiplier = ${formatFloat(hidden.entryDelayMultiplier, 2)}
+MaxUnitMoveOneGridTime = ${formatFloat(hidden.maxUnitMoveOneGridTime, 2)}
+ForcedAiWaitTime = ${formatFloat(hidden.forcedAiWaitTime, 2)}
+
+[Visuals]
+DisableCameraFocusTweens = ${boolText(hidden.disableCameraFocusTweens)}
+DisableFocusAnimations = ${boolText(hidden.disableFocusAnimations)}
+DisableHighlightAnimations = ${boolText(hidden.disableHighlightAnimations)}
+DisableHitAnimations = ${boolText(hidden.disableHitAnimations)}
+DisableSkillSpecialEffects = ${boolText(hidden.disableSkillSpecialEffects)}
+`).trimStart();
+}
+
+function buildHorseTemplate(settings = DEFAULT_VISIBLE_SETTINGS): string {
+  return normalizeNewlines(`
+## Settings file was created by LongYinPlus Electron
+## Plugin GUID: codex.longyin.horsestamina
+
+[WorldMapHorse]
+StaminaMultiplier = ${formatFloat(settings.horseStaminaMultiplier, 2)}
+`).trimStart();
+}
+
+async function ensureConfigFile(filePath: string, template: string): Promise<string> {
+  const existing = await readTextIfExists(filePath);
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  await writeTextFile(filePath, template);
+  return template;
+}
+
+async function ensureSteamAppIdFile(filePath: string): Promise<void> {
+  const existing = await readTextIfExists(filePath);
+  if (existing !== undefined && existing.trim() !== STEAM_APP_ID) {
+    await fs.copyFile(filePath, `${filePath}.bak`).catch(() => undefined);
+  }
+
+  await writeTextFile(filePath, `${STEAM_APP_ID}\r\n`);
+}
+
+async function ensureDoorstopLoader(filePath: string): Promise<void> {
+  const existing = await readTextIfExists(filePath);
+  if (existing === undefined) {
+    return;
+  }
+
+  const updated = upsertIniValue(
+    upsertIniValue(existing, 'enabled', 'true'),
+    'ignore_disable_switch',
+    'true'
+  );
+
+  if (updated !== existing) {
+    await writeTextFile(filePath, updated);
+  }
+}
+
+function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
+  return {
+    lockStamina: input.lockStamina,
+    expMultiplier: Math.round(clamp(input.expMultiplier, 1, 999)),
+    creationPointMultiplier: Math.round(clamp(input.creationPointMultiplier, 1, 999)),
+    horseBaseSpeedMultiplier: clamp(input.horseBaseSpeedMultiplier, 0.01, 999),
+    horseTurboSpeedMultiplier: clamp(input.horseTurboSpeedMultiplier, 0.01, 999),
+    horseTurboDurationMultiplier: clamp(input.horseTurboDurationMultiplier, 0.01, 999),
+    horseTurboCooldownMultiplier: clamp(input.horseTurboCooldownMultiplier, 0.01, 999),
+    lockHorseTurboStamina: input.lockHorseTurboStamina,
+    horseStaminaMultiplier: clamp(input.horseStaminaMultiplier, 0.01, 999),
+    carryWeightCap: clamp(input.carryWeightCap, 0, 999999999),
+    ignoreCarryWeight: input.ignoreCarryWeight,
+    merchantCarryCash: Math.round(clamp(input.merchantCarryCash, 0, 999999999)),
+    luckyHitChancePercent: Math.round(clamp(input.luckyHitChancePercent, 0, 100)),
+    extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
+    debatePlayerDamageTakenMultiplier: clamp(input.debatePlayerDamageTakenMultiplier, 0, 999),
+    debateEnemyDamageTakenMultiplier: clamp(input.debateEnemyDamageTakenMultiplier, 0, 999),
+    craftRandomPickUpgrade: input.craftRandomPickUpgrade,
+    drinkPlayerPowerCostMultiplier: clamp(input.drinkPlayerPowerCostMultiplier, 0, 999),
+    drinkEnemyPowerCostMultiplier: clamp(input.drinkEnemyPowerCostMultiplier, 0, 999),
+    dailySkillInsightChancePercent: Math.round(clamp(input.dailySkillInsightChancePercent, 0, 100)),
+    dailySkillInsightExpPercent: clamp(input.dailySkillInsightExpPercent, 0, 999),
+    dailySkillInsightUseRarityScaling: input.dailySkillInsightUseRarityScaling,
+    dailySkillInsightRealtimeIntervalSeconds: clamp(input.dailySkillInsightRealtimeIntervalSeconds, 0, 999),
+    skillTalentEnabled: input.skillTalentEnabled,
+    skillTalentLevelThreshold: Math.round(clamp(input.skillTalentLevelThreshold, 1, 999)),
+    skillTalentTierPointMultiplier: clamp(input.skillTalentTierPointMultiplier, 0.1, 999),
+    skillTalentPlayerOnly: input.skillTalentPlayerOnly,
+    dialogMonthlyLimitMultiplier: clamp(input.dialogMonthlyLimitMultiplier, 0.1, 999),
+    traceMode: input.traceMode,
+    freezeDate: input.freezeDate,
+    freezeHotkey: normalizeHotkey(input.freezeHotkey, DEFAULT_VISIBLE_SETTINGS.freezeHotkey),
+    outsideBattleSpeedHotkey: normalizeHotkey(
+      input.outsideBattleSpeedHotkey,
+      DEFAULT_VISIBLE_SETTINGS.outsideBattleSpeedHotkey
+    ),
+    battleTurboEnabled: input.battleTurboEnabled,
+    battleTurboHotkey: normalizeHotkey(input.battleTurboHotkey, DEFAULT_VISIBLE_SETTINGS.battleTurboHotkey)
+  };
+}
+
+function parseVisibleFromMain(text: string | undefined): VisibleSettings {
+  return {
+    lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
+    expMultiplier: readInt(text, 'ExpMultiplier', DEFAULT_VISIBLE_SETTINGS.expMultiplier),
+    creationPointMultiplier: readInt(text, 'PointMultiplier', DEFAULT_VISIBLE_SETTINGS.creationPointMultiplier),
+    horseBaseSpeedMultiplier: readFloat(text, 'BaseSpeedMultiplier', DEFAULT_VISIBLE_SETTINGS.horseBaseSpeedMultiplier),
+    horseTurboSpeedMultiplier: readFloat(text, 'TurboSpeedMultiplier', DEFAULT_VISIBLE_SETTINGS.horseTurboSpeedMultiplier),
+    horseTurboDurationMultiplier: readFloat(text, 'TurboDurationMultiplier', DEFAULT_VISIBLE_SETTINGS.horseTurboDurationMultiplier),
+    horseTurboCooldownMultiplier: readFloat(text, 'TurboCooldownMultiplier', DEFAULT_VISIBLE_SETTINGS.horseTurboCooldownMultiplier),
+    lockHorseTurboStamina: readBool(text, 'LockTurboStamina', DEFAULT_VISIBLE_SETTINGS.lockHorseTurboStamina),
+    horseStaminaMultiplier: DEFAULT_VISIBLE_SETTINGS.horseStaminaMultiplier,
+    carryWeightCap: readFloat(text, 'CarryWeightCap', DEFAULT_VISIBLE_SETTINGS.carryWeightCap),
+    ignoreCarryWeight: readBool(text, 'IgnoreCarryWeight', DEFAULT_VISIBLE_SETTINGS.ignoreCarryWeight),
+    merchantCarryCash: readInt(text, 'MerchantCarryCash', DEFAULT_VISIBLE_SETTINGS.merchantCarryCash),
+    luckyHitChancePercent: readInt(text, 'LuckyHitChancePercent', DEFAULT_VISIBLE_SETTINGS.luckyHitChancePercent),
+    extraRelationshipGainChancePercent: readInt(
+      text,
+      'ExtraRelationshipGainChancePercent',
+      DEFAULT_VISIBLE_SETTINGS.extraRelationshipGainChancePercent
+    ),
+    debatePlayerDamageTakenMultiplier: readFloat(
+      text,
+      'PlayerDamageTakenMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.debatePlayerDamageTakenMultiplier
+    ),
+    debateEnemyDamageTakenMultiplier: readFloat(
+      text,
+      'EnemyDamageTakenMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.debateEnemyDamageTakenMultiplier
+    ),
+    craftRandomPickUpgrade: readBool(text, 'RandomPickUpgrade', DEFAULT_VISIBLE_SETTINGS.craftRandomPickUpgrade),
+    drinkPlayerPowerCostMultiplier: readFloat(
+      text,
+      'PlayerPowerCostMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.drinkPlayerPowerCostMultiplier
+    ),
+    drinkEnemyPowerCostMultiplier: readFloat(
+      text,
+      'EnemyPowerCostMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.drinkEnemyPowerCostMultiplier
+    ),
+    dailySkillInsightChancePercent: readInt(
+      text,
+      'HitChancePercent',
+      DEFAULT_VISIBLE_SETTINGS.dailySkillInsightChancePercent
+    ),
+    dailySkillInsightExpPercent: readFloat(text, 'ExpPercent', DEFAULT_VISIBLE_SETTINGS.dailySkillInsightExpPercent),
+    dailySkillInsightUseRarityScaling: readBool(
+      text,
+      'UseRarityScaling',
+      DEFAULT_VISIBLE_SETTINGS.dailySkillInsightUseRarityScaling
+    ),
+    dailySkillInsightRealtimeIntervalSeconds: readFloat(
+      text,
+      'RealtimeIntervalSeconds',
+      DEFAULT_VISIBLE_SETTINGS.dailySkillInsightRealtimeIntervalSeconds
+    ),
+    skillTalentEnabled: DEFAULT_VISIBLE_SETTINGS.skillTalentEnabled,
+    skillTalentLevelThreshold: DEFAULT_VISIBLE_SETTINGS.skillTalentLevelThreshold,
+    skillTalentTierPointMultiplier: DEFAULT_VISIBLE_SETTINGS.skillTalentTierPointMultiplier,
+    skillTalentPlayerOnly: DEFAULT_VISIBLE_SETTINGS.skillTalentPlayerOnly,
+    dialogMonthlyLimitMultiplier: DEFAULT_VISIBLE_SETTINGS.dialogMonthlyLimitMultiplier,
+    traceMode: readBool(text, 'TraceMode', DEFAULT_VISIBLE_SETTINGS.traceMode),
+    freezeDate: readBool(text, 'FreezeDate', DEFAULT_VISIBLE_SETTINGS.freezeDate),
+    freezeHotkey: readString(text, 'ToggleFreezeDateHotkey', DEFAULT_VISIBLE_SETTINGS.freezeHotkey),
+    outsideBattleSpeedHotkey: readString(
+      text,
+      'CycleOutsideBattleSpeedHotkey',
+      DEFAULT_VISIBLE_SETTINGS.outsideBattleSpeedHotkey
+    ),
+    battleTurboEnabled: DEFAULT_VISIBLE_SETTINGS.battleTurboEnabled,
+    battleTurboHotkey: DEFAULT_VISIBLE_SETTINGS.battleTurboHotkey
+  };
+}
+
+function parseVisibleFromHorse(text: string | undefined, settings: VisibleSettings): VisibleSettings {
+  return {
+    ...settings,
+    horseStaminaMultiplier: readFloat(text, 'StaminaMultiplier', settings.horseStaminaMultiplier)
+  };
+}
+
+function parseVisibleFromTrace(text: string | undefined, settings: VisibleSettings): VisibleSettings {
+  const traceEnabled = readBool(text, 'Enabled', DEFAULT_TRACE_HIDDEN.enabled);
+  return {
+    ...settings,
+    traceMode: settings.traceMode || traceEnabled,
+    dialogMonthlyLimitMultiplier: readFloat(
+      text,
+      'MonthlyLimitMultiplier',
+      settings.dialogMonthlyLimitMultiplier
+    )
+  };
+}
+
+function parseVisibleFromSkill(text: string | undefined, settings: VisibleSettings): VisibleSettings {
+  return {
+    ...settings,
+    skillTalentEnabled: readBool(text, 'Enabled', settings.skillTalentEnabled),
+    skillTalentLevelThreshold: readInt(text, 'LevelThreshold', settings.skillTalentLevelThreshold),
+    skillTalentTierPointMultiplier: readFloat(
+      text,
+      'TierPointMultiplier',
+      settings.skillTalentTierPointMultiplier
+    ),
+    skillTalentPlayerOnly: readBool(text, 'PlayerOnly', settings.skillTalentPlayerOnly)
+  };
+}
+
+function parseVisibleFromBattle(text: string | undefined, settings: VisibleSettings): VisibleSettings {
+  return {
+    ...settings,
+    battleTurboEnabled: readBool(text, 'Enabled', settings.battleTurboEnabled),
+    battleTurboHotkey: readString(text, 'ToggleHotkey', settings.battleTurboHotkey)
+  };
+}
+
+export async function ensureGameFiles(gameRoot: string): Promise<void> {
+  const paths = getGamePaths(gameRoot);
+  await ensureConfigFile(paths.mainConfigPath, buildMainTemplate());
+  await ensureConfigFile(paths.horseConfigPath, buildHorseTemplate());
+  await ensureConfigFile(paths.traceConfigPath, buildTraceTemplate());
+  await ensureConfigFile(paths.skillConfigPath, buildSkillTemplate());
+  await ensureConfigFile(paths.battleConfigPath, buildBattleTemplate());
+  await ensureSteamAppIdFile(paths.steamAppIdPath);
+  await ensureDoorstopLoader(paths.doorstopConfigPath);
+}
+
+export async function readVisibleSettings(gameRoot: string): Promise<VisibleSettings> {
+  const paths = getGamePaths(gameRoot);
+  await ensureGameFiles(gameRoot);
+
+  const mainText = await readTextIfExists(paths.mainConfigPath);
+  const horseText = await readTextIfExists(paths.horseConfigPath);
+  const traceText = await readTextIfExists(paths.traceConfigPath);
+  const skillText = await readTextIfExists(paths.skillConfigPath);
+  const battleText = await readTextIfExists(paths.battleConfigPath);
+
+  let settings = parseVisibleFromMain(mainText);
+  settings = parseVisibleFromHorse(horseText, settings);
+  settings = parseVisibleFromTrace(traceText, settings);
+  settings = parseVisibleFromSkill(skillText, settings);
+  settings = parseVisibleFromBattle(battleText, settings);
+  return sanitizeVisibleSettings(settings);
+}
+
+export async function saveVisibleSettings(gameRoot: string, settings: VisibleSettings): Promise<void> {
+  const paths = getGamePaths(gameRoot);
+  await ensureGameFiles(gameRoot);
+  const normalized = sanitizeVisibleSettings(settings);
+
+  const mainText = await ensureConfigFile(paths.mainConfigPath, buildMainTemplate());
+  const horseText = await ensureConfigFile(paths.horseConfigPath, buildHorseTemplate());
+  const traceText = await ensureConfigFile(paths.traceConfigPath, buildTraceTemplate());
+  const skillText = await ensureConfigFile(paths.skillConfigPath, buildSkillTemplate());
+  const battleText = await ensureConfigFile(paths.battleConfigPath, buildBattleTemplate());
+
+  let nextMain = mainText;
+  nextMain = upsertIniValue(nextMain, 'LockStamina', boolText(normalized.lockStamina));
+  nextMain = upsertIniValue(nextMain, 'ExpMultiplier', String(normalized.expMultiplier));
+  nextMain = upsertIniValue(nextMain, 'PointMultiplier', String(normalized.creationPointMultiplier));
+  nextMain = upsertIniValue(nextMain, 'BaseSpeedMultiplier', formatFloat(normalized.horseBaseSpeedMultiplier));
+  nextMain = upsertIniValue(nextMain, 'TurboSpeedMultiplier', formatFloat(normalized.horseTurboSpeedMultiplier));
+  nextMain = upsertIniValue(nextMain, 'TurboDurationMultiplier', formatFloat(normalized.horseTurboDurationMultiplier));
+  nextMain = upsertIniValue(nextMain, 'TurboCooldownMultiplier', formatFloat(normalized.horseTurboCooldownMultiplier));
+  nextMain = upsertIniValue(nextMain, 'LockTurboStamina', boolText(normalized.lockHorseTurboStamina));
+  nextMain = upsertIniValue(nextMain, 'CarryWeightCap', formatFloat(normalized.carryWeightCap));
+  nextMain = upsertIniValue(nextMain, 'IgnoreCarryWeight', boolText(normalized.ignoreCarryWeight));
+  nextMain = upsertIniValue(nextMain, 'MerchantCarryCash', String(normalized.merchantCarryCash));
+  nextMain = upsertIniValue(nextMain, 'LuckyHitChancePercent', String(normalized.luckyHitChancePercent));
+  nextMain = upsertIniValue(
+    nextMain,
+    'ExtraRelationshipGainChancePercent',
+    String(normalized.extraRelationshipGainChancePercent)
+  );
+  nextMain = upsertIniValue(
+    nextMain,
+    'PlayerDamageTakenMultiplier',
+    formatFloat(normalized.debatePlayerDamageTakenMultiplier)
+  );
+  nextMain = upsertIniValue(
+    nextMain,
+    'EnemyDamageTakenMultiplier',
+    formatFloat(normalized.debateEnemyDamageTakenMultiplier)
+  );
+  nextMain = upsertIniValue(nextMain, 'RandomPickUpgrade', boolText(normalized.craftRandomPickUpgrade));
+  nextMain = upsertIniValue(
+    nextMain,
+    'PlayerPowerCostMultiplier',
+    formatFloat(normalized.drinkPlayerPowerCostMultiplier)
+  );
+  nextMain = upsertIniValue(
+    nextMain,
+    'EnemyPowerCostMultiplier',
+    formatFloat(normalized.drinkEnemyPowerCostMultiplier)
+  );
+  nextMain = upsertIniValue(nextMain, 'HitChancePercent', String(normalized.dailySkillInsightChancePercent));
+  nextMain = upsertIniValue(nextMain, 'ExpPercent', formatFloat(normalized.dailySkillInsightExpPercent, 1));
+  nextMain = upsertIniValue(nextMain, 'UseRarityScaling', boolText(normalized.dailySkillInsightUseRarityScaling));
+  nextMain = upsertIniValue(
+    nextMain,
+    'RealtimeIntervalSeconds',
+    formatFloat(normalized.dailySkillInsightRealtimeIntervalSeconds, 1)
+  );
+  nextMain = upsertIniValue(nextMain, 'TraceMode', boolText(normalized.traceMode));
+  nextMain = upsertIniValue(nextMain, 'FreezeDate', boolText(normalized.freezeDate));
+  nextMain = upsertIniValue(nextMain, 'ToggleFreezeDateHotkey', normalized.freezeHotkey);
+  nextMain = upsertIniValue(nextMain, 'CycleOutsideBattleSpeedHotkey', normalized.outsideBattleSpeedHotkey);
+  await writeTextFile(paths.mainConfigPath, nextMain);
+
+  let nextHorse = horseText;
+  nextHorse = upsertIniValue(nextHorse, 'StaminaMultiplier', formatFloat(normalized.horseStaminaMultiplier, 2));
+  await writeTextFile(paths.horseConfigPath, nextHorse);
+
+  let nextTrace = traceText;
+  nextTrace = upsertIniValue(nextTrace, 'Enabled', boolText(normalized.traceMode));
+  nextTrace = upsertIniValue(
+    nextTrace,
+    'MonthlyLimitMultiplier',
+    formatFloat(normalized.dialogMonthlyLimitMultiplier, 1)
+  );
+  await writeTextFile(paths.traceConfigPath, nextTrace);
+
+  let nextSkill = skillText;
+  nextSkill = upsertIniValue(nextSkill, 'Enabled', boolText(normalized.skillTalentEnabled));
+  nextSkill = upsertIniValue(nextSkill, 'LevelThreshold', String(normalized.skillTalentLevelThreshold));
+  nextSkill = upsertIniValue(nextSkill, 'TierPointMultiplier', formatFloat(normalized.skillTalentTierPointMultiplier, 2));
+  nextSkill = upsertIniValue(nextSkill, 'PlayerOnly', boolText(normalized.skillTalentPlayerOnly));
+  await writeTextFile(paths.skillConfigPath, nextSkill);
+
+  let nextBattle = battleText;
+  nextBattle = upsertIniValue(nextBattle, 'Enabled', boolText(normalized.battleTurboEnabled));
+  nextBattle = upsertIniValue(nextBattle, 'ToggleHotkey', normalized.battleTurboHotkey);
+  await writeTextFile(paths.battleConfigPath, nextBattle);
+}
+
+export async function ensureSteamAppId(gameRoot: string): Promise<void> {
+  const paths = getGamePaths(gameRoot);
+  await ensureSteamAppIdFile(paths.steamAppIdPath);
+}
+
+export async function ensureDoorstopEnabled(gameRoot: string): Promise<void> {
+  const paths = getGamePaths(gameRoot);
+  await ensureDoorstopLoader(paths.doorstopConfigPath);
+}
