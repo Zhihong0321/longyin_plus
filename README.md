@@ -54,6 +54,39 @@
 下载 ZIP 后，解压到任意位置，然后双击 `Install.cmd`。同一个包里也包含 `Uninstall.cmd`，方便后续干净卸载。
 安装器还会清除复制到游戏目录中的 Windows 下载标记，这样首次启动时能减少 Defender 云扫描弹窗。
 
+## 标准 OTA 发布
+
+仓库根目录提供了统一入口：
+
+- [git-push-ota.cmd](G:\Steam\steamapps\common\longyin_plus_repo\git-push-ota.cmd)
+- [publish-update.cmd](G:\Steam\steamapps\common\longyin_plus_repo\publish-update.cmd)
+
+这两个命令是同义入口，都会执行同一套 OTA 发布流程：
+
+1. 检查当前 Git 状态和最近变更
+2. 读取 `electron-app/package.json` 版本号
+3. 运行 `npm run typecheck`
+4. 运行 `npm run build`
+5. 校验 `release/LongYinProMaxApp-<version>-win-x64.zip`
+6. 校验 `release/update-manifest.json`
+7. 推送当前分支和对应 tag
+8. 创建或更新 GitHub Release
+9. 上传 ZIP 和 `update-manifest.json`
+
+默认脚本要求工作树干净，否则会拒绝发布。
+
+如果只想做预检查，不真正发布，可以运行：
+
+```powershell
+.\git-push-ota.ps1 -DryRun
+```
+
+如果已经手动 build，只想校验和发布，可以运行：
+
+```powershell
+.\git-push-ota.ps1 -SkipBuild
+```
+
 ## 手动安装
 
 如果你不想使用安装脚本，也可以手动把 `dist/` 里的内容复制到游戏根目录。

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { GameSnapshot, OperationResult, UpdateCheckResult, VisibleSettings } from './shared/types';
+import type { GameSnapshot, OperationResult, ReleaseHistoryItem, UpdateCheckResult, VisibleSettings } from './shared/types';
 
 export interface LongYinApi {
   getSnapshot: () => Promise<GameSnapshot>;
@@ -11,8 +11,10 @@ export interface LongYinApi {
   launch: () => Promise<OperationResult>;
   saveAndLaunch: (settings: VisibleSettings) => Promise<OperationResult>;
   checkUpdates: () => Promise<UpdateCheckResult>;
+  getReleaseHistory: () => Promise<ReleaseHistoryItem[]>;
   applyUpdate: () => Promise<OperationResult>;
   openPath: (targetPath: string) => Promise<void>;
+  openExternal: (targetUrl: string) => Promise<void>;
 }
 
 const api: LongYinApi = {
@@ -25,8 +27,10 @@ const api: LongYinApi = {
   launch: () => ipcRenderer.invoke('app:launch'),
   saveAndLaunch: (settings: VisibleSettings) => ipcRenderer.invoke('app:save-and-launch', settings),
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  getReleaseHistory: () => ipcRenderer.invoke('app:get-release-history'),
   applyUpdate: () => ipcRenderer.invoke('app:apply-update'),
-  openPath: (targetPath: string) => ipcRenderer.invoke('app:open-path', targetPath)
+  openPath: (targetPath: string) => ipcRenderer.invoke('app:open-path', targetPath),
+  openExternal: (targetUrl: string) => ipcRenderer.invoke('app:open-external', targetUrl)
 };
 
 contextBridge.exposeInMainWorld('longyin', api);

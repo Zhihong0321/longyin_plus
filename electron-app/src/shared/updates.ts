@@ -4,7 +4,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import AdmZip from 'adm-zip';
-import { RELEASE_MANIFEST_NAME, UpdateCheckResult, UpdateManifest } from './types';
+import { RELEASE_MANIFEST_NAME, ReleaseHistoryItem, UpdateCheckResult, UpdateManifest } from './types';
 
 const GITHUB_OWNER = 'Zhihong0321';
 const GITHUB_REPO = 'longyin_plus';
@@ -44,16 +44,6 @@ function matchesPattern(value: string, pattern: string): boolean {
   return new RegExp(`^${escaped}$`, 'i').test(normalizedValue);
 }
 
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    const stat = await fs.stat(filePath);
-    return stat.isFile();
-  }
-  catch {
-    return false;
-  }
-}
-
 async function directoryExists(dirPath: string): Promise<boolean> {
   try {
     const stat = await fs.stat(dirPath);
@@ -78,6 +68,20 @@ async function downloadJson(url: string): Promise<any> {
   }
 
   return response.json();
+}
+
+function normalizeRelease(releaseJson: any, isLatest: boolean): ReleaseHistoryItem {
+  const version = String(releaseJson.tag_name ?? releaseJson.name ?? '').replace(/^v/i, '').trim();
+
+  return {
+    tagName: String(releaseJson.tag_name ?? ''),
+    version,
+    name: String(releaseJson.name ?? releaseJson.tag_name ?? version ?? '未命名版本'),
+    publishedAt: releaseJson.published_at ? String(releaseJson.published_at) : undefined,
+    body: String(releaseJson.body ?? '').trim(),
+    htmlUrl: releaseJson.html_url ? String(releaseJson.html_url) : undefined,
+    isLatest
+  };
 }
 
 async function downloadBuffer(url: string): Promise<Buffer> {
@@ -129,6 +133,7 @@ async function extractFilteredZip(zipPath: string, stageRoot: string, preservePa
 
 export async function checkGitHubRelease(currentVersion: string): Promise<UpdateCheckResult> {
   const releaseJson = await downloadJson(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`);
+  const normalizedRelease = normalizeRelease(releaseJson, true);
   const latestVersion = String(releaseJson.tag_name ?? releaseJson.name ?? '').replace(/^v/i, '').trim();
   const updateAvailable = Boolean(latestVersion) && compareVersionParts(latestVersion, currentVersion) > 0;
   const assets = Array.isArray(releaseJson.assets) ? releaseJson.assets : [];
@@ -139,8 +144,10 @@ export async function checkGitHubRelease(currentVersion: string): Promise<Update
       currentVersion,
       latestVersion: latestVersion || currentVersion,
       updateAvailable: false,
-      releaseName: releaseJson.name,
-      publishedAt: releaseJson.published_at,
+      releaseName: normalizedRelease.name,
+      publishedAt: normalizedRelease.publishedAt,
+      releaseBody: normalizedRelease.body,
+      releaseUrl: normalizedRelease.htmlUrl,
       status: `最新发布中未包含 ${RELEASE_MANIFEST_NAME} 资源。`
     };
   }
@@ -153,13 +160,29 @@ export async function checkGitHubRelease(currentVersion: string): Promise<Update
     currentVersion,
     latestVersion: manifest.version || latestVersion || currentVersion,
     updateAvailable: updateAvailable && compareVersionParts(manifest.version, currentVersion) > 0,
-    releaseName: releaseJson.name,
-    publishedAt: releaseJson.published_at,
+    releaseName: normalizedRelease.name,
+    publishedAt: normalizedRelease.publishedAt,
+    releaseBody: normalizedRelease.body,
+    releaseUrl: normalizedRelease.htmlUrl,
     manifest,
     asset: zipAsset,
     assetUrl: zipAsset?.browser_download_url,
     status: updateAvailable ? '发现了新版本。' : '当前已经是最新版本。'
   };
+}
+
+export async function fetchReleaseHistory(limit = 8): Promise<ReleaseHistoryItem[]> {
+  const releasesJson = await downloadJson(
+    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=${Math.max(1, Math.min(limit, 20))}`
+  );
+
+  if (!Array.isArray(releasesJson)) {
+    return [];
+  }
+
+  return releasesJson
+    .filter((release: any) => !release.draft)
+    .map((release: any, index: number) => normalizeRelease(release, index === 0));
 }
 
 export async function stageGitHubUpdate(manifest: UpdateManifest): Promise<{ stageRoot: string; manifest: UpdateManifest }> {

@@ -5,6 +5,9 @@ mod-prototype/dist/
 mod-prototype/_codex_temp_reflect/
 mod-prototype/*/artifacts/
 mod-prototype/mod-prototype/
+electron-app/node_modules/
+electron-app/dist/
+electron-app/release/
 
 # Local tool state
 mod-prototype/LongYinModControl/*.json

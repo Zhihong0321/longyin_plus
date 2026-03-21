@@ -1,6 +1,7 @@
 export const GAME_EXE_NAME = 'LongYinLiZhiZhuan.exe';
 export const STEAM_APP_ID = '3202030';
 export const RELEASE_MANIFEST_NAME = 'update-manifest.json';
+export const APP_FOLDER_NAME = 'LongYinProMaxApp';
 
 export interface VisibleSettings {
   lockStamina: boolean;
@@ -52,12 +53,24 @@ export interface UpdateReleaseAsset {
   size: number;
 }
 
+export interface ReleaseHistoryItem {
+  tagName: string;
+  version: string;
+  name: string;
+  publishedAt?: string;
+  body: string;
+  htmlUrl?: string;
+  isLatest: boolean;
+}
+
 export interface UpdateCheckResult {
   currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
   releaseName?: string;
   publishedAt?: string;
+  releaseBody?: string;
+  releaseUrl?: string;
   manifest?: UpdateManifest;
   asset?: UpdateReleaseAsset;
   assetUrl?: string;
@@ -70,7 +83,10 @@ export interface GameSnapshot {
   gameRoot?: string;
   gameRootDetected: boolean;
   gameInstalled: boolean;
+  gameRunning: boolean;
   launchReady: boolean;
+  launchState: 'idle' | 'starting' | 'running';
+  launchNote: string;
   visibleSettings: VisibleSettings;
   status: string;
   update: UpdateCheckResult;

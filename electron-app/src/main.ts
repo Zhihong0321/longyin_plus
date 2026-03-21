@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   ensureDoorstopEnabled,
   ensureGameFiles,
@@ -13,25 +14,32 @@ import {
 import { detectSteamGameRoot, isValidGameRoot } from './shared/steam';
 import {
   checkGitHubRelease,
+  fetchReleaseHistory,
   launchUpdateHelper,
   stageGitHubUpdate
 } from './shared/updates';
 import {
+  APP_FOLDER_NAME,
   GAME_EXE_NAME,
   GameSnapshot,
   OperationResult,
+  ReleaseHistoryItem,
   UpdateCheckResult,
   VisibleSettings
 } from './shared/types';
 
+const execFileAsync = promisify(execFile);
+const LAUNCH_GRACE_MS = 30_000;
+
 const IS_PACKAGED = app.isPackaged;
 const APP_ROOT = IS_PACKAGED ? path.dirname(process.execPath) : path.resolve(__dirname, '..', '..');
-const PROJECT_ROOT = APP_ROOT;
+const APP_CONTENT_ROOT = IS_PACKAGED ? app.getAppPath() : path.resolve(__dirname, '..', '..');
 const PAYLOAD_ROOT =
   process.env.LONGYIN_PAYLOAD_ROOT ??
-  (IS_PACKAGED ? path.join(process.resourcesPath, 'payload') : path.resolve(PROJECT_ROOT, '..', 'dist'));
+  (IS_PACKAGED ? path.join(process.resourcesPath, 'payload') : path.resolve(APP_CONTENT_ROOT, '..', 'dist'));
 const USER_DATA_ROOT = process.env.LONGYIN_USER_DATA_ROOT ?? path.join(APP_ROOT, 'user-data');
 const SETTINGS_PATH = path.join(USER_DATA_ROOT, 'settings.json');
+const STARTUP_LOG_PATH = path.join(USER_DATA_ROOT, 'startup.log');
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
@@ -82,9 +90,61 @@ let cachedUpdate: UpdateCheckResult = {
   updateAvailable: false,
   status: '更新检查尚未运行。'
 };
+let cachedReleaseHistory: ReleaseHistoryItem[] = [];
+let lastLaunchAt = 0;
+
+async function writeStartupLog(message: string): Promise<void> {
+  const line = `[${new Date().toISOString()}] ${message}\n`;
+  await fs.mkdir(USER_DATA_ROOT, { recursive: true });
+  await fs.appendFile(STARTUP_LOG_PATH, line, 'utf8').catch(() => undefined);
+}
 
 async function ensureAppDirectories(): Promise<void> {
   await fs.mkdir(USER_DATA_ROOT, { recursive: true });
+}
+
+async function isGameProcessRunning(): Promise<boolean> {
+  if (process.platform !== 'win32') {
+    return false;
+  }
+
+  try {
+    const { stdout } = await execFileAsync('tasklist', ['/FI', `IMAGENAME eq ${GAME_EXE_NAME}`, '/FO', 'CSV', '/NH']);
+    return stdout.toLowerCase().includes(GAME_EXE_NAME.toLowerCase());
+  }
+  catch {
+    return false;
+  }
+}
+
+function getLaunchState(gameRunning: boolean): {
+  launchReady: boolean;
+  launchState: 'idle' | 'starting' | 'running';
+  launchNote: string;
+} {
+  const withinGrace = lastLaunchAt > 0 && Date.now() - lastLaunchAt < LAUNCH_GRACE_MS;
+
+  if (withinGrace) {
+    return {
+      launchReady: false,
+      launchState: 'starting',
+      launchNote: '游戏正在启动中。BepInEx 首次注入通常需要 10 到 20 秒，请不要重复点击。'
+    };
+  }
+
+  if (gameRunning) {
+    return {
+      launchReady: false,
+      launchState: 'running',
+      launchNote: '检测到游戏进程正在运行。如窗口尚未出现，请稍等片刻。'
+    };
+  }
+
+  return {
+    launchReady: true,
+    launchState: 'idle',
+    launchNote: '可以安全启动。首次加载模组时，游戏窗口可能会延迟 10 到 20 秒出现。'
+  };
 }
 
 async function readSettings(): Promise<AppSettings> {
@@ -102,10 +162,38 @@ async function writeSettings(nextSettings: AppSettings): Promise<void> {
   await fs.writeFile(SETTINGS_PATH, `${JSON.stringify(nextSettings, null, 2)}\n`, 'utf8');
 }
 
+async function inferInstalledGameRoot(): Promise<string | undefined> {
+  const candidates = [
+    process.env.LONGYIN_GAME_ROOT,
+    IS_PACKAGED && path.basename(APP_ROOT).toLowerCase() === APP_FOLDER_NAME.toLowerCase()
+      ? path.resolve(APP_ROOT, '..')
+      : undefined,
+    APP_ROOT
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+
+    if (await isValidGameRoot(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
 async function loadGameRoot(): Promise<string | undefined> {
   const settings = await readSettings();
   if (settings.gameRoot && (await isValidGameRoot(settings.gameRoot))) {
     return settings.gameRoot;
+  }
+
+  const installed = await inferInstalledGameRoot();
+  if (installed) {
+    await writeSettings({ gameRoot: installed });
+    return installed;
   }
 
   const detected = await detectSteamGameRoot();
@@ -220,6 +308,12 @@ async function launchGame(gameRoot: string): Promise<void> {
     throw new Error('请先安装模组载荷，再启动游戏。');
   }
 
+  const gameRunning = await isGameProcessRunning();
+  const launchState = getLaunchState(gameRunning);
+  if (launchState.launchState !== 'idle') {
+    throw new Error(launchState.launchNote);
+  }
+
   await ensureLaunchPrereqs(gameRoot);
   await fs.stat(paths.gameExePath).catch(() => {
     throw new Error(`未找到游戏可执行文件：${paths.gameExePath}`);
@@ -232,6 +326,7 @@ async function launchGame(gameRoot: string): Promise<void> {
     windowsHide: true
   });
   child.unref();
+  lastLaunchAt = Date.now();
 }
 
 async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
@@ -240,6 +335,8 @@ async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
 
   let visibleSettings = { ...DEFAULT_VISIBLE_SETTINGS };
   let gameInstalled = false;
+  const gameRunning = await isGameProcessRunning();
+  const launchState = getLaunchState(gameRunning);
 
   if (gameRoot) {
     visibleSettings = await readVisibleSettings(gameRoot);
@@ -252,7 +349,10 @@ async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
     gameRoot,
     gameRootDetected: Boolean(gameRoot),
     gameInstalled,
-    launchReady: Boolean(gameRoot) && gameInstalled,
+    gameRunning,
+    launchReady: Boolean(gameRoot) && gameInstalled && launchState.launchReady,
+    launchState: launchState.launchState,
+    launchNote: launchState.launchNote,
     visibleSettings,
     status,
     update: cachedUpdate
@@ -270,13 +370,25 @@ async function saveSettingsAndRefresh(settings: VisibleSettings): Promise<GameSn
 }
 
 async function checkUpdates(): Promise<UpdateCheckResult> {
+  await writeStartupLog('开始检查更新。');
   cachedUpdate = await checkGitHubRelease(app.getVersion()).catch((error: Error) => ({
     currentVersion: app.getVersion(),
     latestVersion: app.getVersion(),
     updateAvailable: false,
     status: `更新检查失败：${error.message}`
   }));
+  await writeStartupLog(`更新检查完成：${cachedUpdate.status ?? '无状态'}`);
   return cachedUpdate;
+}
+
+async function getReleaseHistory(): Promise<ReleaseHistoryItem[]> {
+  await writeStartupLog('开始拉取更新历史。');
+  cachedReleaseHistory = await fetchReleaseHistory().catch(async (error: Error) => {
+    await writeStartupLog(`更新历史拉取失败：${error.message}`);
+    return cachedReleaseHistory;
+  });
+  await writeStartupLog(`更新历史拉取完成：${cachedReleaseHistory.length} 条。`);
+  return cachedReleaseHistory;
 }
 
 async function applyUpdate(): Promise<OperationResult> {
@@ -356,9 +468,9 @@ function registerIpc(): void {
     await launchGame(gameRoot);
     return {
       ok: true,
-      message: '游戏已启动。',
+      message: '已发送启动请求。BepInEx 载入可能需要 10 到 20 秒，请不要重复点击。',
       gameRoot,
-      updatedSnapshot: await buildSnapshot('已启动。')
+      updatedSnapshot: await buildSnapshot('启动中。')
     } satisfies OperationResult;
   });
   ipcMain.handle('app:save-and-launch', async (_event, settings: VisibleSettings) => {
@@ -370,19 +482,24 @@ function registerIpc(): void {
     await launchGame(snapshot.gameRoot);
     return {
       ok: true,
-      message: '设置已保存并启动游戏。',
+      message: '设置已保存，并已发送启动请求。BepInEx 载入可能需要 10 到 20 秒。',
       gameRoot: snapshot.gameRoot,
-      updatedSnapshot: await buildSnapshot('已保存并启动。')
+      updatedSnapshot: await buildSnapshot('启动中。')
     } satisfies OperationResult;
   });
   ipcMain.handle('app:check-updates', async () => checkUpdates());
+  ipcMain.handle('app:get-release-history', async () => getReleaseHistory());
   ipcMain.handle('app:apply-update', async () => applyUpdate());
   ipcMain.handle('app:open-path', async (_event, targetPath: string) => {
     await shell.openPath(targetPath);
   });
+  ipcMain.handle('app:open-external', async (_event, targetUrl: string) => {
+    await shell.openExternal(targetUrl);
+  });
 }
 
 async function createMainWindow(): Promise<void> {
+  await writeStartupLog('开始创建主窗口。');
   mainWindow = new BrowserWindow({
     width: 1380,
     height: 940,
@@ -403,20 +520,50 @@ async function createMainWindow(): Promise<void> {
     return { action: 'deny' };
   });
 
-  const rendererIndex = path.join(APP_ROOT, 'dist', 'renderer', 'index.html');
-  await mainWindow.loadFile(rendererIndex);
+  const rendererIndex = path.join(APP_CONTENT_ROOT, 'dist', 'renderer', 'index.html');
+  await fs.stat(rendererIndex).catch(() => {
+    throw new Error(`未找到渲染入口：${rendererIndex}`);
+  });
+  await writeStartupLog(`渲染入口：${rendererIndex}`);
+
+  try {
+    await mainWindow.loadFile(rendererIndex);
+    await writeStartupLog('主窗口加载完成。');
+  }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await writeStartupLog(`界面加载失败：${message}`);
+    await dialog.showErrorBox('界面加载失败', message);
+    throw error;
+  }
 
   if (!IS_PACKAGED) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
 }
 
+process.on('uncaughtException', (error) => {
+  void writeStartupLog(`未捕获异常：${error.stack ?? error.message}`);
+  dialog.showErrorBox('启动失败', error.message);
+});
+
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
+  void writeStartupLog(`未处理拒绝：${message}`);
+});
+
 app.whenReady().then(async () => {
+  await writeStartupLog('应用启动。');
   await ensureAppDirectories();
   registerIpc();
   cachedGameRoot = await loadGameRoot();
-  cachedUpdate = await checkUpdates();
+  await writeStartupLog(`游戏目录：${cachedGameRoot ?? '未找到'}`);
   await createMainWindow();
+  void checkUpdates();
+  void getReleaseHistory();
+}).catch(async (error: Error) => {
+  await writeStartupLog(`启动链失败：${error.stack ?? error.message}`);
+  dialog.showErrorBox('启动失败', error.message);
 });
 
 app.on('window-all-closed', () => {
