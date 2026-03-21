@@ -1,13 +1,12 @@
-# 龙胤立志传 Pro Max MOD 便携版安装与运行说明
+# 龙吟立志传 MOD 便携版安装与运行说明
 
 适用游戏版本：`1.071F`
 
-本压缩包为便携版，不是自动安装器。
+本压缩包为便携版模组载荷。
+唯一受支持的启动与配置方式是单独打包的 Electron 启动器 `LongYinProMax.exe`。
 
 `BepInEx` 启动器文件已经包含在压缩包里，不需要你另外安装；你只需要把压缩包内容解压到游戏根目录即可。
 压缩包里还包含 `Uninstall.cmd`，方便你之后清理并重新安装。
-
-如果你使用的是新的 Electron 便携版，请优先运行 `龙胤立志传 Pro Max.exe`，它会自动识别游戏目录、管理模组文件，并提供中文界面与 OTA 更新。
 
 ## 一、安装步骤
 
@@ -23,47 +22,36 @@
 - `dotnet\`
 - `doorstop_config.ini`
 - `winhttp.dll`
-- `LongYinModControl.ps1`
+- `LongYinProMaxApp\`
 
 如果你把压缩包解压成了多一层子文件夹，MOD 将不会生效。请确保这些文件和 `LongYinLiZhiZhuan.exe` 在同一层目录关系下。
 
 ## 二、运行方法
 
-1. 运行 `龙胤立志传 Pro Max.exe`
-2. 等待中文配置界面打开
+1. 运行 `Launch-LongYinProMax.cmd` 或 `LongYinProMaxApp\LongYinProMax.exe`
+2. 让应用自动识别或手动选择游戏目录
 3. 如需修改功能，先调整选项
 4. 点击 `保存并启动`
 5. 游戏启动后，MOD 会自动随游戏加载
-6. 如果你想先清理再重装，可以运行 `Uninstall.cmd`
-
-如果你不想用窗口，也可以运行旧版 PowerShell 工具：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\LongYinModControl.ps1
-```
-
-如果你不改设置，也可以直接点击 `启动游戏`，但推荐使用 `保存并启动`。
-
-如果你想直接进入游戏而不打开 MOD 配置窗口，可以运行 `LaunchGame.cmd`
+6. 如果你想先清理再重装，可使用应用内卸载，或运行 `Uninstall.cmd`
 
 ## 三、首次启动说明
 
 - 首次启动可能会比平时稍慢，这是正常现象
 - MOD 配置文件如果不存在，会在首次打开配置工具或首次启动游戏时自动创建
 - `BepInEx` 不是“首次运行自动联网安装”，而是已经随本压缩包一起提供
+- 新版 Electron 启动器会通过 GitHub Releases 拉取更新，但它不会覆盖你的游戏目录内容
 - 安装器会自动清除下载标记，尽量减少 Windows Defender 的云安全扫描提示
-- 安装器会写入 `steam_appid.txt`，这样在新电脑上直接启动也能拿到正确的 Steam App ID
-- 安装器会优先自动识别 Steam 游戏目录，识别失败才要求你手动选择
 
 ## 四、常见问题
 
-### 1. 运行 `龙胤立志传 Pro Max.exe` 没反应
+### 1. 运行 `LongYinProMax.exe` 没反应
 
 请确认你是把压缩包解压到了游戏根目录，而不是别的文件夹。
 
-### 2. Windows 弹出脚本或安全提示
+### 2. Windows 弹出安全提示
 
-请直接运行：`powershell -ExecutionPolicy Bypass -File .\LongYinModControl.ps1`
+请直接运行：`LongYinProMax.exe`
 
 ### 3. 游戏启动了，但 MOD 没生效
 
@@ -73,7 +61,6 @@ powershell -ExecutionPolicy Bypass -File .\LongYinModControl.ps1
 - 是否存在 `winhttp.dll`
 - 是否存在 `doorstop_config.ini`
 - `BepInEx\plugins` 里是否有本 MOD 的 `.dll` 文件
-- 根目录里是否有 `steam_appid.txt`，且内容是 `3202030`
 
 ## 五、卸载方法
 

@@ -9,10 +9,13 @@ mod-prototype/mod-prototype/
 electron-app/node_modules/
 electron-app/dist/
 electron-app/release/
+mod-src/bin/
 
 # Local tool state
 mod-prototype/LongYinModControl/*.json
 mod-prototype/LongYinQuestSnapshot/test.txt
+.codex-tools/
+archive/
 
 # Logs
 *.log

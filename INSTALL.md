@@ -2,8 +2,8 @@
 
 适用游戏版本：`1.071F`
 
-本压缩包为便携版，不是自动安装器。
-当前推荐的控制界面是单独打包的 Electron 启动器；如果你还在使用旧版压缩包，也可以继续用里面的 `Play.cmd`。
+本压缩包为便携版模组载荷。
+唯一受支持的启动与配置方式是单独打包的 Electron 启动器 `LongYinProMax.exe`。
 
 `BepInEx` 启动器文件已经包含在压缩包里，不需要你另外安装；你只需要把压缩包内容解压到游戏根目录即可。
 压缩包里还包含 `Uninstall.cmd`，方便你之后清理并重新安装。
@@ -22,25 +22,18 @@
 - `dotnet\`
 - `doorstop_config.ini`
 - `winhttp.dll`
-- `LongYinModControl.ps1`
-- `electron-app\`
+- `LongYinProMaxApp\`
 
 如果你把压缩包解压成了多一层子文件夹，MOD 将不会生效。请确保这些文件和 `LongYinLiZhiZhuan.exe` 在同一层目录关系下。
 
 ## 二、运行方法
 
-1. 运行 `Install.cmd`
-2. 如果你拿到的是新版 Electron 启动器，请先打开它并选择游戏目录
+1. 运行 `Launch-LongYinProMax.cmd` 或 `LongYinProMaxApp\LongYinProMax.exe`
+2. 让应用自动识别或手动选择游戏目录
 3. 如需修改功能，先调整选项
-4. 点击 `Save And Launch`
+4. 点击 `保存并启动`
 5. 游戏启动后，MOD 会自动随游戏加载
-6. 如果你想先清理再重装，可以运行 `Uninstall.cmd`
-
-安装完成后，如果你只是想直接进入游戏，可以运行 `LaunchGame.cmd`
-
-如果你不改设置，也可以直接点击 `Launch Game`，但推荐使用 `Save And Launch`。
-
-如果你还没有新版 Electron 启动器，可以继续运行 `Play.cmd` 使用旧的 PowerShell 配置窗口。
+6. 如果你想先清理再重装，可使用应用内卸载，或运行 `Uninstall.cmd`
 
 ## 三、首次启动说明
 
@@ -52,13 +45,13 @@
 
 ## 四、常见问题
 
-### 1. 运行 `Install.cmd` 没反应
+### 1. 运行 `LongYinProMax.exe` 没反应
 
 请确认你是把压缩包解压到了游戏根目录，而不是别的文件夹。
 
-### 2. Windows 弹出脚本或安全提示
+### 2. Windows 弹出安全提示
 
-请直接运行：`Install.cmd` 或 `Play.cmd`
+请直接运行：`LongYinProMax.exe`
 
 ### 3. 游戏启动了，但 MOD 没生效
 

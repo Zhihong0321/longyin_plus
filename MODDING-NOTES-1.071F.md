@@ -68,26 +68,18 @@ Main prototype folder:
 - `mod-prototype\build-il2cpp-plugin.ps1`
 - `mod-prototype\build-all-mods.ps1`
 
-Current split plugins:
+Current supported launcher and packaged plugins:
 
-- `mod-prototype\LongYinStaminaLock\LongYinStaminaLock.cs`
-- `mod-prototype\LongYinGameplayTest\LongYinGameplayTest.cs`
-- `mod-prototype\LongYinTraceData\LongYinTraceData.cs`
-
-Current live control tool:
-
-- `mod-prototype\LongYinModControl\LongYinModControl.ps1`
-- `Open-Mod-Control.cmd`
-
-Active plugin DLLs:
-
+- `electron-app\`
+- `LongYinProMax.exe`
+- `BepInEx\plugins\LongYinBattleTurbo.dll`
+- `BepInEx\plugins\LongYinHorseStaminaMultiplier.dll`
+- `BepInEx\plugins\LongYinQuestSnapshot.dll`
+- `BepInEx\plugins\LongYinSkillTalentGrant.dll`
+- `BepInEx\plugins\LongYinSkipIntro.dll`
 - `BepInEx\plugins\LongYinStaminaLock.dll`
-- `BepInEx\plugins\LongYinGameplayTest.dll`
-- `BepInEx\plugins\LongYinTraceData.dll`
 
-Legacy combined plugin was retired and renamed:
-
-- `BepInEx\plugins\LongYinMoneyProbe.dll.disabled`
+Legacy retired probes and tracers are archived and not part of the active mod payload.
 
 ## Confirmed Working Gameplay Hooks
 
@@ -216,7 +208,6 @@ Current stable keys:
 - `LockStamina = true/false`
 - `ExpMultiplier = <integer>`
 - `PointMultiplier = <integer>`
-- `TraceMode = true/false`
 - `FreezeDate = true/false`
 - `ToggleFreezeDateHotkey = <keycode>`
 
@@ -449,25 +440,13 @@ Character-creation related:
 - `leftFightSkillPoint`
 - `leftLivingSkillPoint`
 
-### Trace plugin advice
+### Legacy tracing status
 
-The trace plugin is useful, but keep it disabled by default.
+The old tracing and probe modules are retired.
 
-Trace config:
-
-- `BepInEx\config\codex.longyin.tracedata.cfg`
-
-Default recommended state:
-
-- `Enabled = false`
-
-Latest trace-data behavior:
-
-- the forced dialog continue hook now behaves like a fast-forward toggle
-- it skips dialog pacing instead of forcing auto-plot state changes
-- if forced fast-forward can wedge a dialog, trace `PlotController.Update`, `SetSkipPlot`, `SetAutoPlot`, `PlotTextShowFinished`, `PlotChoiceShowFinished`, `ChangeNextPlot`, and `GoNextPlot`
-- the current safety fallback is to disable forced skip after several unchanged frames of open dialog; watch `plotHappen`, `plotChoiceShowing`, `plotTextShowing`, `plotAutoing`, and `plotSkipping`
-- `SetSkipPlot(true)` is the critical fast-forward call; `SetAutoPlot(true)` is a different path and should stay out of the fast-forward-only feature
+- they are not part of the supported Electron workflow
+- they are not part of the packaged `dist/` payload
+- any historical tracer assets should stay under `archive/`, not in active mod folders
 - useful stuck-dialog logging should include the controller field dump and the controller game object tree so hidden continue/next UI can be spotted
 - forced fast-forward can wedge on treasure/dig choice branches such as `ChooseDigTreasure`; in that case, a branch-level guard is better than only turning skip off temporarily because `PlotController.Update` may reapply it on the next frame
 - the same family of wedge also appears on lock-chest choice branches such as `OpenLockChest`; keep these treasure-choice call paths out of the forced skip reapply logic
@@ -500,9 +479,9 @@ powershell -ExecutionPolicy Bypass -File .\mod-prototype\build-il2cpp-plugin.ps1
 If starting fresh in a future session:
 
 1. Read this file first.
-2. Read `mod-prototype\LongYinStaminaLock\LongYinStaminaLock.cs`.
-3. Use `Open-Mod-Control.cmd` for user-facing settings.
-4. If tracing is needed, enable `codex.longyin.tracedata.cfg` temporarily.
+2. Read the active Electron launcher source under `electron-app\`.
+3. Use `LongYinProMax.exe` for user-facing settings and game launch.
+4. Keep legacy tracer assets archived and out of active payloads.
 5. Do not spend time retrying custom `MonoBehaviour` injection unless there is a strong reason.
 
 ## Bottom Line

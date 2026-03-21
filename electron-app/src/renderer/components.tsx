@@ -51,6 +51,9 @@ export function defaultSettings(): VisibleSettings {
     craftRandomPickUpgrade: true,
     drinkPlayerPowerCostMultiplier: 1,
     drinkEnemyPowerCostMultiplier: 1,
+    dialogMonthlyLimitMultiplier: 3,
+    dialogFastForwardEnabled: true,
+    dialogFastForwardHotkey: 'P',
     dailySkillInsightChancePercent: 0,
     dailySkillInsightExpPercent: 5,
     dailySkillInsightUseRarityScaling: true,
@@ -59,8 +62,6 @@ export function defaultSettings(): VisibleSettings {
     skillTalentLevelThreshold: 10,
     skillTalentTierPointMultiplier: 2,
     skillTalentPlayerOnly: true,
-    dialogMonthlyLimitMultiplier: 3,
-    traceMode: false,
     freezeDate: false,
     freezeHotkey: 'F1',
     outsideBattleSpeedHotkey: 'F11',
@@ -162,6 +163,19 @@ export function SelectField(props: {
           </option>
         ))}
       </select>
+    </FieldShell>
+  );
+}
+
+export function TextField(props: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  hint?: string;
+}) {
+  return (
+    <FieldShell label={props.label} hint={props.hint}>
+      <input className="input" type="text" value={props.value} onChange={(event) => props.onChange(event.target.value)} />
     </FieldShell>
   );
 }

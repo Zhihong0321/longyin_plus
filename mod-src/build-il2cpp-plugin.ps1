@@ -5,19 +5,53 @@ param(
     [string]$Output,
     [Parameter(Mandatory = $true)]
     [string]$StagedPluginOutput,
-    [string]$LivePluginOutput = ""
+    [string]$LivePluginOutput = "",
+    [string]$LoaderRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$loaderRoot = Join-Path $repoRoot "_codex_disabled_loader"
+if ($LoaderRoot -ne "") {
+    $loaderRoot = Resolve-Path $LoaderRoot
+}
+elseif (Test-Path (Join-Path $repoRoot "_codex_disabled_loader")) {
+    $loaderRoot = Resolve-Path (Join-Path $repoRoot "_codex_disabled_loader")
+}
+else {
+    $loaderRoot = Resolve-Path "G:\Steam\steamapps\common\LongYinLiZhiZhuan\_codex_disabled_loader"
+}
 $bepInExRoot = Join-Path $loaderRoot "BepInEx"
 $interopDir = Join-Path $bepInExRoot "interop"
 $coreDir = Join-Path $bepInExRoot "core"
+$localDotnetRoot = Join-Path $repoRoot ".codex-tools\dotnet"
 $runtimeDir = "C:\Program Files\dotnet\shared\Microsoft.NETCore.App\6.0.5"
 $compiler = Join-Path $loaderRoot ".codex-temp\compilers\tasks\netcore\bincore\csc.dll"
+$dotnetHost = "dotnet"
 $outputDir = Split-Path -Parent $Output
+
+if (-not (Test-Path $compiler)) {
+    $sdkDir = Get-ChildItem -Path (Join-Path $localDotnetRoot "sdk") -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        Select-Object -First 1
+    if ($sdkDir -ne $null) {
+        $compiler = Join-Path $sdkDir.FullName "Roslyn\bincore\csc.dll"
+    }
+}
+
+if (-not (Test-Path $compiler)) {
+    throw "Expected C# compiler not found at $compiler."
+}
+
+if (-not (Test-Path $runtimeDir)) {
+    $runtimeCandidate = Get-ChildItem -Path (Join-Path $localDotnetRoot "shared\Microsoft.NETCore.App") -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        Select-Object -First 1
+    if ($runtimeCandidate -ne $null) {
+        $runtimeDir = $runtimeCandidate.FullName
+        $dotnetHost = Join-Path $localDotnetRoot "dotnet.exe"
+    }
+}
 
 if (-not (Test-Path $runtimeDir)) {
     throw "Expected .NET runtime not found at $runtimeDir."
@@ -51,7 +85,7 @@ $references = @(
 
 $referenceArgs = $references | ForEach-Object { "-r:$_" }
 
-& dotnet $compiler `
+& $dotnetHost $compiler `
     /nologo `
     /target:library `
     /langversion:latest `

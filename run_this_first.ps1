@@ -220,4 +220,4 @@ Ensure-SteamAppId -TargetRoot $targetRoot
 Unblock-InstalledFiles -TargetRoot $targetRoot
 
 Write-Host "Install complete."
-Write-Host "You can now run LongYinModControl.cmd from the game root."
+Write-Host "You can now open LongYinProMax.exe from the LongYinProMaxApp folder."

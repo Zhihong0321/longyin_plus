@@ -9,7 +9,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.9")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.10")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -26,6 +26,7 @@ private const string TeachSkillSideTabSoundName = "Woosh";
 private const float TeachSkillSideTabSoundVolume = 1f;
     private const float DrinkFillMatchTolerance = 0.02f;
     private const float DrinkFillDeltaTolerance = 0.005f;
+    private const float DialogFastForwardPulseIntervalSecondsDefault = 0.5f;
     private static readonly string[] RelationshipBonusMessages =
     {
         "你今天比较帅，好感有多加 {0}",
@@ -67,7 +68,14 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<bool> _teachSkillSameSectAreaShareEnabled = null!;
     private static ConfigEntry<int> _teachSkillSameSectAreaShareMinPercent = null!;
     private static ConfigEntry<int> _teachSkillSameSectAreaShareMaxPercent = null!;
+    private static ConfigEntry<float> _dialogMonthlyLimitMultiplier = null!;
+    private static ConfigEntry<bool> _forceAutoContinueEnabled = null!;
+    private static ConfigEntry<KeyCode> _forceAutoContinueHotkey = null!;
+    private static ConfigEntry<float> _forceAutoContinuePulseIntervalSeconds = null!;
+    private static ConfigEntry<bool> _fastForwardSafetyEnabled = null!;
+    private static ConfigEntry<int> _fastForwardStuckFrames = null!;
     private static ConfigEntry<bool> _traceMode = null!;
+    private static ConfigEntry<bool> _traceTreasureChestEvents = null!;
     private static ConfigEntry<bool> _freezeDate = null!;
     private static ConfigEntry<KeyCode> _freezeDateHotkey = null!;
     private static ConfigEntry<KeyCode> _outsideBattleSpeedHotkey = null!;
@@ -89,6 +97,14 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static float _lastDrinkPlayerFillAmount = float.NaN;
     private static float _lastDrinkEnemyFillAmount = float.NaN;
     private static bool? _lastResolvedDrinkTargetIsPlayer;
+    private static readonly Dictionary<string, int> _dialogMonthlyUseCounts = new(StringComparer.Ordinal);
+    private static HeroData? _activeDialogHero;
+    private static int _activeDialogHeroId = -1;
+    private static bool _forceAutoContinueActive;
+    private static int _lastDialogProgressFrame = -1;
+    private static string _lastDialogObservedSignature = string.Empty;
+    private static string _lastDialogStuckSignature = string.Empty;
+    private static float _nextDialogFastForwardPulseAt = -1f;
     private Harmony? _harmony;
 
     private sealed class MoneyChangeState
@@ -183,10 +199,18 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _teachSkillSameSectAreaShareEnabled = Config.Bind("Teaching", "SameSectAreaShareEnabled", true, "When the player teaches martial-skill EXP to a same-sect NPC, other same-sect NPCs in the same area who already know that skill also gain EXP.");
         _teachSkillSameSectAreaShareMinPercent = Config.Bind("Teaching", "SameSectAreaShareMinPercent", 80, "Minimum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
         _teachSkillSameSectAreaShareMaxPercent = Config.Bind("Teaching", "SameSectAreaShareMaxPercent", 120, "Maximum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
-        _traceMode = Config.Bind("Debug", "TraceMode", false, "Logs targeted date progression hooks for validation.");
+        _dialogMonthlyLimitMultiplier = Config.Bind("DialogFlow", "MonthlyLimitMultiplier", 3f, "Scales the monthly per-NPC interaction quota used by talk, teach, and similar meet choices.");
+        _forceAutoContinueEnabled = Config.Bind("DialogFlow", "ForceAutoContinueEnabled", true, "When enabled, the dialog fast-forward toggle is available and starts active.");
+        _forceAutoContinueHotkey = Config.Bind("DialogFlow", "ForceAutoContinueHotkey", KeyCode.P, "Hotkey used to toggle forced dialog fast-forward.");
+        _forceAutoContinuePulseIntervalSeconds = Config.Bind("DialogFlow", "ForceAutoContinuePulseIntervalSeconds", DialogFastForwardPulseIntervalSecondsDefault, "How often forced dialog fast-forward sends an extra advance pulse while dialog text is open. Set to 0 to disable the pulse.");
+        _fastForwardSafetyEnabled = Config.Bind("DialogFlow", "FastForwardSafetyEnabled", true, "Automatically disables forced fast-forward if a dialog appears stuck for too long.");
+        _fastForwardStuckFrames = Config.Bind("DialogFlow", "FastForwardStuckFrames", 180, "How many unchanged frames are allowed before the fast-forward safety turns itself off.");
+        _traceMode = Config.Bind("Debug", "TracerEnabled", false, "Master switch for all mod tracer logs. When false, trace helpers stay silent.");
+        _traceTreasureChestEvents = Config.Bind("Debug", "TraceTreasureChestEvents", false, "When TracerEnabled is true, logs treasure chest interception, choice UI, and reward resolution.");
         _freezeDate = Config.Bind("Time", "FreezeDate", false, "Blocks in-game day, month, and year progression.");
         _freezeDateHotkey = Config.Bind("Time", "ToggleFreezeDateHotkey", KeyCode.F10, "Hotkey that toggles date freezing while in game.");
         _outsideBattleSpeedHotkey = Config.Bind("Time", "CycleOutsideBattleSpeedHotkey", KeyCode.F11, "Hotkey that cycles the test speed multiplier outside battle.");
+        _forceAutoContinueActive = _forceAutoContinueEnabled.Value;
 
         _harmony = new Harmony("codex.longyin.staminalock");
         PatchMethod(typeof(ExploreController), "ChangeMoveStep", new[] { typeof(int) }, nameof(ChangeMoveStepPrefix), null);
@@ -201,6 +225,11 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(PlotController), nameof(PlotController.ChangeNextPlot), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.GoNextPlot), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.AutoPlotButtonClicked), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.ShowHeroInteractUI), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.ManageMeetNpcPlot), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.Update), Type.EmptyTypes, nameof(DialogControllerUpdatePrefix), nameof(DialogControllerUpdatePostfix));
+        PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.Update), Type.EmptyTypes, null, nameof(DialogChoiceRowPostfix));
+        PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.OnClick), Type.EmptyTypes, nameof(DialogChoiceClickPrefix), null);
         PatchMethod(typeof(BuildChoiceButtonController), nameof(BuildChoiceButtonController.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
         PatchMethod(typeof(UIButton), nameof(UIButton.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
         PatchMethod(typeof(UIButtonMessage), nameof(UIButtonMessage.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
@@ -267,7 +296,12 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo(
             $"Same-sect teaching splash starts {(_teachSkillSameSectAreaShareEnabled.Value ? "ON" : "OFF")} " +
             $"at {ClampTeachSkillSplashPercent(_teachSkillSameSectAreaShareMinPercent.Value)}%-{ClampTeachSkillSplashPercent(_teachSkillSameSectAreaShareMaxPercent.Value)}%.");
-        Log.LogInfo($"Trace mode starts {(_traceMode.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Dialog monthly limit multiplier starts at x{FormatConfigFloat(_dialogMonthlyLimitMultiplier.Value)}.");
+        Log.LogInfo(
+            $"Dialog fast-forward starts {(_forceAutoContinueActive ? "ON" : "OFF")} with hotkey {_forceAutoContinueHotkey.Value} " +
+            $"and safety {(_fastForwardSafetyEnabled.Value ? "ON" : "OFF")} at a {Math.Max(0f, _forceAutoContinuePulseIntervalSeconds.Value):0.###}s pulse.");
+        Log.LogInfo($"Tracer master starts {(_traceMode.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Treasure chest tracer starts {(_traceTreasureChestEvents.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Date freeze starts {(_freezeDate.Value ? "ON" : "OFF")} with hotkey {_freezeDateHotkey.Value}.");
         Log.LogInfo($"Outside-battle speed cycle hotkey is {_outsideBattleSpeedHotkey.Value}.");
     }
@@ -340,11 +374,25 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
     private static bool TreasureChestGetItemPrefix(HeroData __instance, ItemData itemData, bool showPopInfo, bool showSpeGetItem, int treasureChestClickTime, bool skipManageItemPoison)
     {
+        TraceTreasureChestEvent(
+            "HeroData.GetItem prefix",
+            __instance,
+            itemData,
+            treasureChestClickTime,
+            skipManageItemPoison,
+            $"showPopInfo={showPopInfo}, showSpeGetItem={showSpeGetItem}");
         return !TryStartTreasureChestChoice(__instance, itemData, treasureChestClickTime, skipManageItemPoison);
     }
 
     private static void TreasureChestGetItemPostfix(HeroData __instance, ItemData itemData, bool showPopInfo, bool showSpeGetItem, int treasureChestClickTime, bool skipManageItemPoison)
     {
+        TraceTreasureChestEvent(
+            "HeroData.GetItem postfix",
+            __instance,
+            itemData,
+            treasureChestClickTime,
+            skipManageItemPoison,
+            $"showPopInfo={showPopInfo}, showSpeGetItem={showSpeGetItem}, choiceEnabled={_treasureChestChoiceEnabled.Value}");
         if (_treasureChestChoiceEnabled.Value)
         {
             return;
@@ -451,8 +499,23 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
     private static bool TryStartTreasureChestChoice(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
     {
+        if (treasureChestClickTime > 0)
+        {
+            TraceTreasureChestEvent("TryStartTreasureChestChoice enter", targetHero, itemData, treasureChestClickTime, skipManageItemPoison);
+        }
+
         if (!_treasureChestChoiceEnabled.Value || _grantingTreasureChestChoiceReward || _grantingTreasureChestBonusItems)
         {
+            if (treasureChestClickTime > 0)
+            {
+                TraceTreasureChestEvent(
+                    "TryStartTreasureChestChoice skip",
+                    targetHero,
+                    itemData,
+                    treasureChestClickTime,
+                    skipManageItemPoison,
+                    $"choiceEnabled={_treasureChestChoiceEnabled.Value}, grantingChoiceReward={_grantingTreasureChestChoiceReward}, grantingBonusItems={_grantingTreasureChestBonusItems}");
+            }
             return false;
         }
 
@@ -461,29 +524,70 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return false;
         }
 
+        if (ShouldSkipTreasureChestChoiceForOriginalReward(itemData))
+        {
+            TraceTreasureChestEvent(
+                "TryStartTreasureChestChoice skip original book/manual reward",
+                targetHero,
+                itemData,
+                treasureChestClickTime,
+                skipManageItemPoison,
+                $"itemType={SafeFormatValue(TryGetItemTypeName(itemData))}");
+            return false;
+        }
+
         var player = TryGetPlayerHero();
         if (player == null || TryGetHeroId(targetHero) != TryGetHeroId(player))
         {
+            TraceTreasureChestEvent(
+                "TryStartTreasureChestChoice skip non-player",
+                targetHero,
+                itemData,
+                treasureChestClickTime,
+                skipManageItemPoison,
+                $"player={TryGetHeroName(player)}/{SafeFormatValue(TryGetHeroId(player))}");
             return false;
         }
 
         if (_activeTreasureChestChoiceSession != null)
         {
             LoggerInstance.LogWarning("Skipped treasure chest choice because another chest choice session is already active.");
+            TraceTreasureChestEvent("TryStartTreasureChestChoice skip active session", targetHero, itemData, treasureChestClickTime, skipManageItemPoison);
             return false;
         }
 
         var options = BuildTreasureChestChoiceOptions(itemData, player);
         if (options.Count <= 1)
         {
+            TraceTreasureChestEvent(
+                "TryStartTreasureChestChoice skip insufficient options",
+                targetHero,
+                itemData,
+                treasureChestClickTime,
+                skipManageItemPoison,
+                $"options={DescribeItemSummaries(options)}");
             return false;
         }
 
         if (!TryShowTreasureChestChoicePlot(player, options, skipManageItemPoison))
         {
+            TraceTreasureChestEvent(
+                "TryStartTreasureChestChoice failed to show plot",
+                targetHero,
+                itemData,
+                treasureChestClickTime,
+                skipManageItemPoison,
+                $"options={DescribeItemSummaries(options)}");
             return false;
         }
 
+        TraceTreasureChestEvent(
+            "TryStartTreasureChestChoice activated",
+            targetHero,
+            itemData,
+            treasureChestClickTime,
+            skipManageItemPoison,
+            $"options={DescribeItemSummaries(options)}");
         LoggerInstance.LogInfo(
             $"Treasure chest opened as choose-one reward with {options.Count} options: " +
             $"{string.Join(", ", DescribeItemNames(options))}.");
@@ -506,6 +610,13 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             AddTreasureChestChoiceOption(options, seenKeys, generated);
         }
 
+        TraceTreasureChestEvent(
+            "BuildTreasureChestChoiceOptions result",
+            player,
+            sourceItem,
+            1,
+            false,
+            $"desiredCount={desiredCount}, maxChoiceCount={maxChoiceCount}, options={DescribeItemSummaries(options)}");
         return options;
     }
 
@@ -574,12 +685,26 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
             plotController.ChangePlot(plot);
             PushPlayerLog($"宝箱奖励改为 {options.Count} 选 1");
+            TraceTreasureChestEvent(
+                "TryShowTreasureChestChoicePlot shown",
+                player,
+                options.Count > 0 ? options[0] : null,
+                1,
+                skipManageItemPoison,
+                $"options={DescribeItemSummaries(options)}");
             return true;
         }
         catch (Exception ex)
         {
             _activeTreasureChestChoiceSession = null;
             LoggerInstance.LogWarning($"Failed to show treasure chest choice plot: {ex.Message}");
+            TraceTreasureChestEvent(
+                "TryShowTreasureChestChoicePlot exception",
+                player,
+                options.Count > 0 ? options[0] : null,
+                1,
+                skipManageItemPoison,
+                $"options={DescribeItemSummaries(options)}, exception={ex.Message}");
             return false;
         }
     }
@@ -605,9 +730,23 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         if (index < 0 || index >= session.Options.Count)
         {
             LoggerInstance.LogWarning($"Treasure chest choice index out of range: {index}");
+            TraceTreasureChestEvent(
+                "TryResolveTreasureChestChoiceFromPlot index out of range",
+                session.Player,
+                null,
+                1,
+                session.SkipManageItemPoison,
+                $"param={SafeFormatValue(param)}, index={index}, options={session.Options.Count}");
             return true;
         }
 
+        TraceTreasureChestEvent(
+            "TryResolveTreasureChestChoiceFromPlot resolved",
+            session.Player,
+            session.Options[index],
+            1,
+            session.SkipManageItemPoison,
+            $"param={SafeFormatValue(param)}, index={index}");
         GrantTreasureChestChoiceReward(session, session.Options[index], $"plot:{index}");
         return true;
     }
@@ -702,16 +841,37 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         session.Resolved = true;
         _grantingTreasureChestChoiceReward = true;
+        TraceTreasureChestEvent(
+            "GrantTreasureChestChoiceReward enter",
+            player,
+            chosenItem,
+            1,
+            session.SkipManageItemPoison,
+            $"source={source}");
 
         try
         {
             player.GetItem(chosenItem, true, true, 0, session.SkipManageItemPoison);
             PushPlayerLog($"宝箱选择获得：{chosenItem.name}");
             LoggerInstance.LogInfo($"Treasure chest choice granted from {source}: {DescribeItemSummary(chosenItem)}");
+            TraceTreasureChestEvent(
+                "GrantTreasureChestChoiceReward success",
+                player,
+                chosenItem,
+                0,
+                session.SkipManageItemPoison,
+                $"source={source}");
         }
         catch (Exception ex)
         {
             LoggerInstance.LogWarning($"Failed to grant chosen treasure chest item from {source}: {ex.Message}");
+            TraceTreasureChestEvent(
+                "GrantTreasureChestChoiceReward exception",
+                player,
+                chosenItem,
+                0,
+                session.SkipManageItemPoison,
+                $"source={source}, exception={ex.Message}");
         }
         finally
         {
@@ -1434,6 +1594,382 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
     }
 
+    private static void DialogHeroContextPostfix(HeroData __0)
+    {
+        CacheActiveDialogHero(__0);
+    }
+
+    private static void DialogControllerUpdatePrefix(PlotController __instance)
+    {
+        if (__instance == null)
+        {
+            return;
+        }
+
+        if (CheckForcedAutoContinueHotkey())
+        {
+            _forceAutoContinueActive = !_forceAutoContinueActive;
+            if (!_forceAutoContinueActive)
+            {
+                ResetForcedAutoContinueRuntime();
+                __instance.SetAutoPlot(false);
+                __instance.SetSkipPlot(false);
+                __instance.plotAutoing = false;
+                __instance.plotSkipping = false;
+            }
+            else
+            {
+                ResetForcedAutoContinueRuntime();
+            }
+
+            PushPlayerLog($"Mod: Dialog Fast Forward {(_forceAutoContinueActive ? "ON" : "OFF")}");
+        }
+
+        ApplyForcedAutoContinueIfNeeded(__instance);
+    }
+
+    private static void DialogControllerUpdatePostfix(PlotController __instance)
+    {
+        if (__instance == null)
+        {
+            return;
+        }
+
+        var signature = BuildDialogProgressSignature(__instance);
+        if (!string.Equals(_lastDialogObservedSignature, signature, StringComparison.Ordinal))
+        {
+            _lastDialogObservedSignature = signature;
+            MarkDialogProgress();
+        }
+
+        CheckForFastForwardStuck(__instance);
+    }
+
+    private static void DialogChoiceRowPostfix(PlotInteractController __instance)
+    {
+        if (__instance?.choiceData == null)
+        {
+            return;
+        }
+
+        ApplyDialogMonthlyQuota(__instance, __instance.choiceData, consume: false);
+    }
+
+    private static void DialogChoiceClickPrefix(PlotInteractController __instance)
+    {
+        if (__instance?.choiceData == null)
+        {
+            return;
+        }
+
+        ApplyDialogMonthlyQuota(__instance, __instance.choiceData, consume: true);
+        MarkDialogProgress();
+    }
+
+    private static void CacheActiveDialogHero(HeroData? hero)
+    {
+        _activeDialogHero = hero;
+        _activeDialogHeroId = TryGetHeroId(hero) ?? -1;
+    }
+
+    private static bool CheckForcedAutoContinueHotkey()
+    {
+        try
+        {
+            return Input.GetKeyDown(_forceAutoContinueHotkey.Value);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void ApplyForcedAutoContinueIfNeeded(PlotController? controller)
+    {
+        if (controller == null || !_forceAutoContinueEnabled.Value || !_forceAutoContinueActive)
+        {
+            ResetForcedAutoContinueRuntime();
+            return;
+        }
+
+        var activeChoice = controller.newChoice ?? controller.nowChoice;
+        if (controller.plotChoiceShowing || activeChoice != null)
+        {
+            if (controller.plotAutoing)
+            {
+                controller.SetAutoPlot(false);
+                controller.plotAutoing = false;
+            }
+
+            if (controller.plotSkipping)
+            {
+                controller.SetSkipPlot(false);
+                controller.plotSkipping = false;
+            }
+
+            _nextDialogFastForwardPulseAt = -1f;
+            return;
+        }
+
+        if (!IsDialogOpen(controller))
+        {
+            ResetForcedAutoContinueRuntime();
+            return;
+        }
+
+        EnsureForcedAutoContinueState(controller);
+        TryPulseForcedAutoContinue(controller);
+    }
+
+    private static void EnsureForcedAutoContinueState(PlotController controller)
+    {
+        if (!controller.plotAutoing)
+        {
+            controller.SetAutoPlot(true);
+            controller.plotAutoing = true;
+        }
+
+        controller.SetSkipPlot(true);
+        if (!controller.plotSkipping)
+        {
+            controller.plotSkipping = true;
+        }
+    }
+
+    private static void TryPulseForcedAutoContinue(PlotController controller)
+    {
+        if (!controller.plotTextShowing)
+        {
+            _nextDialogFastForwardPulseAt = -1f;
+            return;
+        }
+
+        var pulseIntervalSeconds = Math.Max(0f, _forceAutoContinuePulseIntervalSeconds.Value);
+        if (pulseIntervalSeconds <= 0f)
+        {
+            return;
+        }
+
+        var now = Time.realtimeSinceStartup;
+        if (_nextDialogFastForwardPulseAt < 0f)
+        {
+            _nextDialogFastForwardPulseAt = now + pulseIntervalSeconds;
+            return;
+        }
+
+        if (now < _nextDialogFastForwardPulseAt)
+        {
+            return;
+        }
+
+        _nextDialogFastForwardPulseAt = now + pulseIntervalSeconds;
+        var beforeSignature = BuildDialogProgressSignature(controller);
+        if (TryAdvanceDialogWithPulse(controller, beforeSignature))
+        {
+            MarkDialogProgress();
+        }
+    }
+
+    private static bool TryAdvanceDialogWithPulse(PlotController controller, string beforeSignature)
+    {
+        return TryRunDialogPulseStep(controller, beforeSignature, nameof(PlotController.PlotBackgroundClicked), static target => target.PlotBackgroundClicked())
+            || TryRunDialogPulseStep(controller, beforeSignature, nameof(PlotController.ChangeNextPlot), static target => target.ChangeNextPlot())
+            || TryRunDialogPulseStep(controller, beforeSignature, nameof(PlotController.GoNextPlot), static target => target.GoNextPlot())
+            || TryRunDialogPulseStep(controller, beforeSignature, nameof(PlotController.AutoPlotButtonClicked), static target => target.AutoPlotButtonClicked());
+    }
+
+    private static bool TryRunDialogPulseStep(PlotController controller, string beforeSignature, string stepName, Action<PlotController> action)
+    {
+        try
+        {
+            action(controller);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Dialog fast-forward pulse step {stepName} failed: {ex.Message}");
+            return false;
+        }
+
+        var afterSignature = BuildDialogProgressSignature(controller);
+        var advanced = !string.Equals(beforeSignature, afterSignature, StringComparison.Ordinal);
+        if (advanced && _traceMode.Value)
+        {
+            LoggerInstance.LogInfo($"Dialog fast-forward pulse advanced via {stepName}: {afterSignature}");
+        }
+
+        return advanced;
+    }
+
+    private static string BuildDialogProgressSignature(PlotController controller)
+    {
+        var newChoiceParam = TryGetChoiceParam(controller.newChoice) ?? string.Empty;
+        var currentChoiceParam = TryGetChoiceParam(controller.nowChoice) ?? string.Empty;
+        var plotId = SafeFormatValue(
+            SafeGetMemberValue(controller, "nowPlotID")
+            ?? SafeGetMemberValue(controller, "plotID")
+            ?? SafeGetMemberValue(controller, "nowPlotIndex"));
+
+        return $"plot={plotId}; happen={controller.plotHappen}; text={controller.plotTextShowing}; choice={controller.plotChoiceShowing}; auto={controller.plotAutoing}; skip={controller.plotSkipping}; new={newChoiceParam}; now={currentChoiceParam}";
+    }
+
+    private static void MarkDialogProgress()
+    {
+        _lastDialogProgressFrame = Time.frameCount;
+        _lastDialogStuckSignature = string.Empty;
+    }
+
+    private static void CheckForFastForwardStuck(PlotController controller)
+    {
+        if (!_forceAutoContinueEnabled.Value || !_forceAutoContinueActive)
+        {
+            return;
+        }
+
+        if (!IsDialogOpen(controller))
+        {
+            ResetForcedAutoContinueRuntime();
+            return;
+        }
+
+        if (_lastDialogProgressFrame < 0)
+        {
+            _lastDialogProgressFrame = Time.frameCount;
+            _lastDialogObservedSignature = BuildDialogProgressSignature(controller);
+            return;
+        }
+
+        var framesSinceProgress = Time.frameCount - _lastDialogProgressFrame;
+        if (framesSinceProgress < _fastForwardStuckFrames.Value)
+        {
+            return;
+        }
+
+        var stuckSignature = BuildDialogProgressSignature(controller);
+        if (string.Equals(_lastDialogStuckSignature, stuckSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastDialogStuckSignature = stuckSignature;
+        if (!_fastForwardSafetyEnabled.Value)
+        {
+            return;
+        }
+
+        _forceAutoContinueActive = false;
+        ResetForcedAutoContinueRuntime();
+        controller.SetAutoPlot(false);
+        controller.SetSkipPlot(false);
+        controller.plotAutoing = false;
+        controller.plotSkipping = false;
+        PushPlayerLog("Mod: Dialog Fast Forward OFF (safety)");
+    }
+
+    private static bool IsDialogOpen(PlotController controller)
+    {
+        return controller.plotHappen || controller.plotChoiceShowing || controller.plotTextShowing;
+    }
+
+    private static void ResetForcedAutoContinueRuntime()
+    {
+        _lastDialogProgressFrame = -1;
+        _lastDialogObservedSignature = string.Empty;
+        _lastDialogStuckSignature = string.Empty;
+        _nextDialogFastForwardPulseAt = -1f;
+    }
+
+    private static void ApplyDialogMonthlyQuota(PlotInteractController controller, SinglePlotChoiceData choice, bool consume)
+    {
+        var timeNeedValue = SafeGetMemberValue(choice, "playerInteractionTimeNeed");
+        var timeNeed = SafeFormatValue(timeNeedValue);
+        if (string.IsNullOrEmpty(timeNeed) || string.Equals(timeNeed, "None", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var heroId = _activeDialogHeroId;
+        if (heroId < 0)
+        {
+            return;
+        }
+
+        var monthKey = GetCurrentWorldMonthKey();
+        var key = $"{monthKey}|hero={heroId}|type={timeNeed}";
+        var used = _dialogMonthlyUseCounts.TryGetValue(key, out var currentUsed) ? currentUsed : 0;
+        var limit = GetDialogMonthlyLimit(heroId, timeNeed);
+        var allowed = used < limit;
+
+        if (consume && allowed)
+        {
+            used++;
+            _dialogMonthlyUseCounts[key] = used;
+        }
+
+        SyncVanillaDialogMonthlyUsage(choice, timeNeedValue, Math.Max(0, limit - used));
+        controller.meetCost = allowed;
+    }
+
+    private static int GetDialogMonthlyLimit(int heroId, string timeNeed)
+    {
+        var multiplier = _dialogMonthlyLimitMultiplier.Value;
+        if (multiplier <= 0f)
+        {
+            return 0;
+        }
+
+        var scaled = (int)Math.Ceiling(multiplier);
+        return Math.Max(1, scaled);
+    }
+
+    private static string GetCurrentWorldMonthKey()
+    {
+        try
+        {
+            var worldData = GameController.Instance?.worldData;
+            var worldTime = SafeGetMemberValue(worldData, "worldTime");
+            if (worldTime == null)
+            {
+                return "unknown-month";
+            }
+
+            var year = SafeGetMemberValue(worldTime, "year");
+            var month = SafeGetMemberValue(worldTime, "month");
+            return $"{SafeFormatValue(year)}-{SafeFormatValue(month)}";
+        }
+        catch
+        {
+            return "unknown-month";
+        }
+    }
+
+    private static void SyncVanillaDialogMonthlyUsage(SinglePlotChoiceData choice, object? timeNeedValue, int remaining)
+    {
+        var playerInteractionTimeData = SafeGetMemberValue(_activeDialogHero, "playerInteractionTimeData");
+        if (playerInteractionTimeData == null || timeNeedValue == null)
+        {
+            return;
+        }
+
+        var list = SafeGetMemberValue(playerInteractionTimeData, "playerInteractTimeList");
+        if (list == null)
+        {
+            return;
+        }
+
+        var timeNeedName = SafeFormatValue(timeNeedValue);
+        if (string.IsNullOrEmpty(timeNeedName) || string.Equals(timeNeedName, "None", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (!Enum.TryParse(timeNeedName, out PlayerInteractionTimeType parsedType))
+        {
+            return;
+        }
+
+        TrySetIndexedValue(list, (int)parsedType, Math.Max(0, remaining));
+    }
+
     private static void ToggleFreezeDate(string source)
     {
         _freezeDate.Value = !_freezeDate.Value;
@@ -1732,7 +2268,129 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return "null";
         }
 
-        return $"{item.name} (id={item.itemID}, itemLv={item.itemLv}, rare={item.rareLv}, value={item.value})";
+        return $"{item.name} (id={item.itemID}, itemLv={item.itemLv}, rare={item.rareLv}, value={item.value}, type={SafeFormatValue(TryGetItemTypeName(item))})";
+    }
+
+    private static string DescribeItemSummaries(IEnumerable<ItemData> items)
+    {
+        if (items == null)
+        {
+            return "none";
+        }
+
+        var parts = new List<string>();
+        foreach (var item in items)
+        {
+            parts.Add(DescribeItemSummary(item));
+        }
+
+        return parts.Count > 0 ? string.Join(" || ", parts) : "none";
+    }
+
+    private static bool IsTreasureChestTraceEnabled()
+    {
+        return _traceMode.Value && _traceTreasureChestEvents.Value;
+    }
+
+    private static bool ShouldSkipTreasureChestChoiceForOriginalReward(ItemData? item)
+    {
+        if (item == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (item.type == ItemType.Book)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        var itemTypeName = TryGetItemTypeName(item);
+        if (string.Equals(itemTypeName, nameof(ItemType.Book), StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var itemName = item.name;
+        return !string.IsNullOrWhiteSpace(itemName) &&
+               (itemName.Contains("秘籍", StringComparison.Ordinal) ||
+                itemName.Contains("秘笈", StringComparison.Ordinal) ||
+                itemName.Contains("功法", StringComparison.Ordinal));
+    }
+
+    private static string? TryGetItemTypeName(ItemData? item)
+    {
+        if (item == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Enum.GetName(typeof(ItemType), item.type) ?? item.type.ToString();
+        }
+        catch
+        {
+        }
+
+        return SafeGetMemberValue(item, "type")?.ToString();
+    }
+
+    private static void TraceTreasureChestEvent(string stage, HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool? skipManageItemPoison, string? extra = null)
+    {
+        if (!IsTreasureChestTraceEnabled())
+        {
+            return;
+        }
+
+        var player = TryGetPlayerHero();
+        var plotController = PlotController.Instance;
+        var session = _activeTreasureChestChoiceSession;
+        var sessionSummary = session == null
+            ? "inactive"
+            : $"active(resolved={session.Resolved}, options={session.Options.Count}, pending={session.PendingClickConfirm}, lastChoice={SafeFormatValue(session.LastObservedChoiceParam)})";
+        var plotSummary = plotController == null
+            ? "plot=unavailable"
+            : $"plotChoiceNow={SafeFormatValue(TryGetChoiceParam(plotController.nowChoice))}, plotChoiceNew={SafeFormatValue(TryGetChoiceParam(plotController.newChoice))}, plotText={SafeFormatValue(TryReadPlotText(plotController))}";
+
+        LoggerInstance.LogInfo(
+            $"[TRACE][TreasureChest] {stage}: " +
+            $"target={TryGetHeroName(targetHero)}/{SafeFormatValue(TryGetHeroId(targetHero))}, " +
+            $"player={TryGetHeroName(player)}/{SafeFormatValue(TryGetHeroId(player))}, " +
+            $"item={DescribeItemSummary(itemData)}, chestClick={treasureChestClickTime}, " +
+            $"skipManageItemPoison={SafeFormatValue(skipManageItemPoison)}, session={sessionSummary}, {plotSummary}" +
+            $"{(string.IsNullOrWhiteSpace(extra) ? string.Empty : $", {extra}")}");
+    }
+
+    private static string? TryReadPlotText(PlotController? plotController)
+    {
+        if (plotController == null)
+        {
+            return null;
+        }
+
+        var directText = TryReadStringMember(plotController, new[] { "plotText", "PlotText" });
+        if (!string.IsNullOrWhiteSpace(directText))
+        {
+            return directText;
+        }
+
+        foreach (var memberName in new[] { "nowPlot", "newPlot", "plotData", "nowPlotData", "showPlotData" })
+        {
+            var plotData = SafeGetMemberValue(plotController, memberName);
+            var plotText = TryReadStringMember(plotData, new[] { "plotText", "PlotText" });
+            if (!string.IsNullOrWhiteSpace(plotText))
+            {
+                return plotText;
+            }
+        }
+
+        return null;
     }
 
     private static int GetCraftMajorTier(ItemData? item)
@@ -2485,6 +3143,26 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return null;
     }
 
+    private static string? TryReadStringMember(object? target, IEnumerable<string> memberNames)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        foreach (var memberName in memberNames)
+        {
+            var value = SafeProperty(target, memberName) ?? SafeField(target, memberName);
+            var stringValue = value?.ToString();
+            if (!string.IsNullOrWhiteSpace(stringValue))
+            {
+                return stringValue;
+            }
+        }
+
+        return null;
+    }
+
     private static float? TryConvertToFloat(object? value)
     {
         return value switch
@@ -2605,6 +3283,16 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return "unknown";
     }
 
+    private static object? SafeGetMemberValue(object? target, string name)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        return SafeProperty(target, name) ?? SafeField(target, name);
+    }
+
     private static object? SafeProperty(object target, string name)
     {
         try
@@ -2681,6 +3369,37 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             if (field != null && TryConvertMemberValue(field.FieldType, value, out var convertedFieldValue))
             {
                 field.SetValue(target, convertedFieldValue);
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    private static bool TrySetIndexedValue(object list, int index, object value)
+    {
+        try
+        {
+            var property = list.GetType().GetProperty("Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (property != null && property.CanWrite)
+            {
+                property.SetValue(list, value, new object[] { index });
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var method = list.GetType().GetMethod("set_Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (method != null)
+            {
+                method.Invoke(list, new object[] { index, value });
                 return true;
             }
         }

@@ -8,6 +8,7 @@ import {
   NumberField,
   SelectField,
   StatusPill,
+  TextField,
   clampText,
   defaultSettings,
   mergeSettings
@@ -648,22 +649,8 @@ export function App() {
 
         {activeTab === 'systems' ? (
           <div className="panel-grid">
-            <Card title="时间、洞察与调试" eyebrow="系统">
+            <Card title="时间与心悟" eyebrow="系统">
               <div className="field-grid">
-                <CheckboxField
-                  label="跟踪模式"
-                  value={settings.traceMode}
-                  onChange={(value) => updateSetting('traceMode', value)}
-                  hint="记录目标钩子，便于验证。"
-                />
-                <NumberField
-                  label="月度对话上限倍数"
-                  value={settings.dialogMonthlyLimitMultiplier}
-                  onChange={(value) => updateSetting('dialogMonthlyLimitMultiplier', value)}
-                  min={0.1}
-                  max={999}
-                  step={0.1}
-                />
                 <CheckboxField
                   label="启动时开启冻结日期"
                   value={settings.freezeDate}
@@ -682,7 +669,28 @@ export function App() {
                   options={HOTKEY_OPTIONS}
                 />
                 <NumberField
-                  label="玩家受到伤害"
+                  label="每月对话次数倍率"
+                  value={settings.dialogMonthlyLimitMultiplier}
+                  onChange={(value) => updateSetting('dialogMonthlyLimitMultiplier', value)}
+                  min={0}
+                  max={999}
+                  step={1}
+                  hint="影响交谈、请教等每月互动次数。"
+                />
+                <CheckboxField
+                  label="启动时开启对话快进"
+                  value={settings.dialogFastForwardEnabled}
+                  onChange={(value) => updateSetting('dialogFastForwardEnabled', value)}
+                  hint="进入纯文本对话时会自动尝试快进，遇到选择时会自动停下。"
+                />
+                <TextField
+                  label="对话快进快捷键"
+                  value={settings.dialogFastForwardHotkey}
+                  onChange={(value) => updateSetting('dialogFastForwardHotkey', clampText(value))}
+                  hint="填写 Unity KeyCode 名称，例如 P、F9、Mouse3。"
+                />
+                <NumberField
+                  label="辩论我方伤害倍率"
                   value={settings.debatePlayerDamageTakenMultiplier}
                   onChange={(value) => updateSetting('debatePlayerDamageTakenMultiplier', value)}
                   min={0}
@@ -690,7 +698,7 @@ export function App() {
                   step={0.25}
                 />
                 <NumberField
-                  label="敌方受到伤害"
+                  label="辩论敌方伤害倍率"
                   value={settings.debateEnemyDamageTakenMultiplier}
                   onChange={(value) => updateSetting('debateEnemyDamageTakenMultiplier', value)}
                   min={0}
@@ -698,7 +706,7 @@ export function App() {
                   step={0.25}
                 />
                 <NumberField
-                  label="玩家气力消耗"
+                  label="对酒我方伤害倍率"
                   value={settings.drinkPlayerPowerCostMultiplier}
                   onChange={(value) => updateSetting('drinkPlayerPowerCostMultiplier', value)}
                   min={0}
@@ -706,7 +714,7 @@ export function App() {
                   step={0.25}
                 />
                 <NumberField
-                  label="敌方气力消耗"
+                  label="对酒敌方伤害倍率"
                   value={settings.drinkEnemyPowerCostMultiplier}
                   onChange={(value) => updateSetting('drinkEnemyPowerCostMultiplier', value)}
                   min={0}
@@ -714,7 +722,7 @@ export function App() {
                   step={0.25}
                 />
                 <NumberField
-                  label="每日技能洞察概率"
+                  label="心悟触发几率"
                   value={settings.dailySkillInsightChancePercent}
                   onChange={(value) => updateSetting('dailySkillInsightChancePercent', value)}
                   min={0}
@@ -723,7 +731,7 @@ export function App() {
                   suffix="%"
                 />
                 <NumberField
-                  label="每日技能洞察经验"
+                  label="心悟经验值比率"
                   value={settings.dailySkillInsightExpPercent}
                   onChange={(value) => updateSetting('dailySkillInsightExpPercent', value)}
                   min={0}
@@ -732,12 +740,12 @@ export function App() {
                   suffix="%"
                 />
                 <CheckboxField
-                  label="使用技能阶层缩放"
+                  label="心悟经验值按武学品级调整"
                   value={settings.dailySkillInsightUseRarityScaling}
                   onChange={(value) => updateSetting('dailySkillInsightUseRarityScaling', value)}
                 />
                 <NumberField
-                  label="实时测试间隔"
+                  label="心悟触发频率"
                   value={settings.dailySkillInsightRealtimeIntervalSeconds}
                   onChange={(value) => updateSetting('dailySkillInsightRealtimeIntervalSeconds', value)}
                   min={0}
@@ -752,28 +760,30 @@ export function App() {
 
         {activeTab === 'talent' ? (
           <div className="panel-grid">
-            <Card title="技能转天赋授权" eyebrow="天赋">
+            <Card title="突破成功额外天赋" eyebrow="天赋">
               <div className="field-grid">
                 <CheckboxField
-                  label="启用技能转天赋授予"
+                  label="启用突破成功额外天赋"
                   value={settings.skillTalentEnabled}
                   onChange={(value) => updateSetting('skillTalentEnabled', value)}
                 />
                 <NumberField
-                  label="触发等级"
+                  label="武学等级触发"
                   value={settings.skillTalentLevelThreshold}
                   onChange={(value) => updateSetting('skillTalentLevelThreshold', value)}
                   min={1}
                   max={999}
                   step={1}
+                  hint="如果设为 5，武学修炼到 5 级时触发天赋奖励。奖励值会根据武学品级变化。"
                 />
                 <NumberField
-                  label="阶层倍率"
+                  label="品级天赋倍率"
                   value={settings.skillTalentTierPointMultiplier}
                   onChange={(value) => updateSetting('skillTalentTierPointMultiplier', value)}
                   min={0.1}
                   max={999}
                   step={0.25}
+                  hint="如果倍率 = 1，灰级 = 1 点、青级 = 2 点天赋。"
                 />
                 <CheckboxField
                   label="仅玩家角色"
@@ -799,7 +809,7 @@ export function App() {
                   value={settings.battleTurboHotkey}
                   onChange={(value) => updateSetting('battleTurboHotkey', clampText(value))}
                   options={BATTLE_TURBO_HOTKEYS}
-                  hint="在战斗中按下可切换加速开关。"
+                  hint="在战斗中按下可切换加速开关。20x 速度，取消技能视觉特效。"
                 />
                 <p className="body-copy body-copy--muted">
                   保存时会自动保留原始模组配置中的高级计时与视觉标记。

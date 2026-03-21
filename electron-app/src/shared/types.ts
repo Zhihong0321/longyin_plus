@@ -23,6 +23,9 @@ export interface VisibleSettings {
   craftRandomPickUpgrade: boolean;
   drinkPlayerPowerCostMultiplier: number;
   drinkEnemyPowerCostMultiplier: number;
+  dialogMonthlyLimitMultiplier: number;
+  dialogFastForwardEnabled: boolean;
+  dialogFastForwardHotkey: string;
   dailySkillInsightChancePercent: number;
   dailySkillInsightExpPercent: number;
   dailySkillInsightUseRarityScaling: boolean;
@@ -31,8 +34,6 @@ export interface VisibleSettings {
   skillTalentLevelThreshold: number;
   skillTalentTierPointMultiplier: number;
   skillTalentPlayerOnly: boolean;
-  dialogMonthlyLimitMultiplier: number;
-  traceMode: boolean;
   freezeDate: boolean;
   freezeHotkey: string;
   outsideBattleSpeedHotkey: string;

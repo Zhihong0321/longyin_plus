@@ -4,8 +4,9 @@ import { GAME_EXE_NAME, STEAM_APP_ID, VisibleSettings } from './types';
 
 const MAIN_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.staminalock.cfg');
 const HORSE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.horsestamina.cfg');
-const TRACE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.tracedata.cfg');
-const SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalenttracer.cfg');
+const LEGACY_TRACE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.tracedata.cfg');
+const LEGACY_SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalenttracer.cfg');
+const SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalentgrant.cfg');
 const BATTLE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.battleturbo.cfg');
 const DOORSTOP_NAME = 'doorstop_config.ini';
 const STEAM_APP_ID_NAME = 'steam_appid.txt';
@@ -19,16 +20,6 @@ interface MainConfigHidden {
   treasureChestTotalItems: number;
 }
 
-interface TraceConfigHidden {
-  enabled: boolean;
-  forceAutoContinueEnabled: boolean;
-  forceAutoContinueHotkey: string;
-  emergencyUnstuckHotkey: string;
-  fastForwardSafetyEnabled: boolean;
-  fastForwardStuckFrames: number;
-  treasureFlowEnabled: boolean;
-}
-
 interface BattleConfigHidden {
   attackDelayMultiplier: number;
   entryDelayMultiplier: number;
@@ -40,7 +31,6 @@ interface BattleConfigHidden {
   disableHitAnimations: boolean;
   disableSkillSpecialEffects: boolean;
   disableBattleVoices: boolean;
-  traceMode: boolean;
 }
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
@@ -63,6 +53,9 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   craftRandomPickUpgrade: true,
   drinkPlayerPowerCostMultiplier: 1,
   drinkEnemyPowerCostMultiplier: 1,
+  dialogMonthlyLimitMultiplier: 3,
+  dialogFastForwardEnabled: true,
+  dialogFastForwardHotkey: 'P',
   dailySkillInsightChancePercent: 0,
   dailySkillInsightExpPercent: 5,
   dailySkillInsightUseRarityScaling: true,
@@ -71,8 +64,6 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   skillTalentLevelThreshold: 10,
   skillTalentTierPointMultiplier: 2,
   skillTalentPlayerOnly: true,
-  dialogMonthlyLimitMultiplier: 3,
-  traceMode: false,
   freezeDate: false,
   freezeHotkey: 'F1',
   outsideBattleSpeedHotkey: 'F11',
@@ -89,16 +80,6 @@ const DEFAULT_MAIN_HIDDEN: MainConfigHidden = {
   treasureChestTotalItems: 2
 };
 
-const DEFAULT_TRACE_HIDDEN: TraceConfigHidden = {
-  enabled: false,
-  forceAutoContinueEnabled: true,
-  forceAutoContinueHotkey: 'P',
-  emergencyUnstuckHotkey: 'F12',
-  fastForwardSafetyEnabled: true,
-  fastForwardStuckFrames: 180,
-  treasureFlowEnabled: false
-};
-
 const DEFAULT_BATTLE_HIDDEN: BattleConfigHidden = {
   attackDelayMultiplier: 0.1,
   entryDelayMultiplier: 0.05,
@@ -109,8 +90,7 @@ const DEFAULT_BATTLE_HIDDEN: BattleConfigHidden = {
   disableHighlightAnimations: true,
   disableHitAnimations: false,
   disableSkillSpecialEffects: true,
-  disableBattleVoices: true,
-  traceMode: false
+  disableBattleVoices: true
 };
 
 function boolText(value: boolean): string {
@@ -163,9 +143,10 @@ export function getGamePaths(gameRoot: string) {
     doorstopConfigPath: path.join(gameRoot, DOORSTOP_NAME),
     mainConfigPath: path.join(gameRoot, MAIN_CONFIG_NAME),
     horseConfigPath: path.join(gameRoot, HORSE_CONFIG_NAME),
-    traceConfigPath: path.join(gameRoot, TRACE_CONFIG_NAME),
     skillConfigPath: path.join(gameRoot, SKILL_CONFIG_NAME),
-    battleConfigPath: path.join(gameRoot, BATTLE_CONFIG_NAME)
+    battleConfigPath: path.join(gameRoot, BATTLE_CONFIG_NAME),
+    legacyTraceConfigPath: path.join(gameRoot, LEGACY_TRACE_CONFIG_NAME),
+    legacySkillConfigPath: path.join(gameRoot, LEGACY_SKILL_CONFIG_NAME)
   };
 }
 
@@ -216,13 +197,38 @@ function upsertIniValue(text: string, key: string, value: string): string {
   return `${text}${suffix}${key} = ${value}\r\n`;
 }
 
+function ensureIniSection(text: string, section: string): string {
+  const pattern = new RegExp(`^\\s*\\[${escapeRegex(section)}\\]\\s*$`, 'mi');
+  if (pattern.test(text)) {
+    return text;
+  }
+
+  const suffix = text.endsWith('\n') || text.endsWith('\r') ? '' : '\r\n';
+  return `${text}${suffix}[${section}]\r\n`;
+}
+
+function upsertIniSectionValue(text: string, section: string, key: string, value: string): string {
+  const ensured = ensureIniSection(text, section);
+  const sectionPattern = new RegExp(
+    `(^\\s*\\[${escapeRegex(section)}\\]\\s*$\\r?\\n?)([\\s\\S]*?)(?=^\\s*\\[[^\\]]+\\]\\s*$|\\Z)`,
+    'mi'
+  );
+
+  return ensured.replace(sectionPattern, (_match, header: string, body: string) => {
+    const keyPattern = new RegExp(`^(\\s*${escapeRegex(key)}\\s*=\\s*).*$`, 'mi');
+    if (keyPattern.test(body)) {
+      return `${header}${body.replace(keyPattern, `$1${value}`)}`;
+    }
+
+    const suffix = body.endsWith('\n') || body.endsWith('\r') || body.length === 0 ? '' : '\r\n';
+    return `${header}${body}${suffix}${key} = ${value}\r\n`;
+  });
+}
+
 function buildMainTemplate(settings = DEFAULT_VISIBLE_SETTINGS, hidden = DEFAULT_MAIN_HIDDEN): string {
   return normalizeNewlines(`
 ## Settings file was created by LongYinPlus Electron
 ## Plugin GUID: codex.longyin.staminalock
-
-[Debug]
-TraceMode = ${boolText(settings.traceMode)}
 
 [Exploration]
 LockStamina = ${boolText(settings.lockStamina)}
@@ -269,6 +275,13 @@ RandomPickUpgrade = ${boolText(settings.craftRandomPickUpgrade)}
 PlayerPowerCostMultiplier = ${formatFloat(settings.drinkPlayerPowerCostMultiplier)}
 EnemyPowerCostMultiplier = ${formatFloat(settings.drinkEnemyPowerCostMultiplier)}
 
+[DialogFlow]
+MonthlyLimitMultiplier = ${formatFloat(settings.dialogMonthlyLimitMultiplier)}
+ForceAutoContinueEnabled = ${boolText(settings.dialogFastForwardEnabled)}
+ForceAutoContinueHotkey = ${settings.dialogFastForwardHotkey}
+FastForwardSafetyEnabled = true
+FastForwardStuckFrames = 180
+
 [DailySkillInsight]
 HitChancePercent = ${settings.dailySkillInsightChancePercent}
 ExpPercent = ${formatFloat(settings.dailySkillInsightExpPercent, 1)}
@@ -282,29 +295,10 @@ CycleOutsideBattleSpeedHotkey = ${settings.outsideBattleSpeedHotkey}
 `).trimStart();
 }
 
-function buildTraceTemplate(hidden = DEFAULT_TRACE_HIDDEN, monthlyLimit = DEFAULT_VISIBLE_SETTINGS.dialogMonthlyLimitMultiplier): string {
-  return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
-## Plugin GUID: codex.longyin.tracedata
-
-[DialogFlow]
-Enabled = ${boolText(hidden.enabled)}
-MonthlyLimitMultiplier = ${formatFloat(monthlyLimit, 1)}
-ForceAutoContinueEnabled = ${boolText(hidden.forceAutoContinueEnabled)}
-ForceAutoContinueHotkey = ${hidden.forceAutoContinueHotkey}
-EmergencyUnstuckHotkey = ${hidden.emergencyUnstuckHotkey}
-FastForwardSafetyEnabled = ${boolText(hidden.fastForwardSafetyEnabled)}
-FastForwardStuckFrames = ${hidden.fastForwardStuckFrames}
-
-[TreasureFlow]
-Enabled = ${boolText(hidden.treasureFlowEnabled)}
-`).trimStart();
-}
-
 function buildSkillTemplate(settings = DEFAULT_VISIBLE_SETTINGS): string {
   return normalizeNewlines(`
 ## Settings file was created by LongYinPlus Electron
-## Plugin GUID: codex.longyin.skilltalenttracer
+## Plugin GUID: codex.longyin.skilltalentgrant
 
 [SkillTalent]
 Enabled = ${boolText(settings.skillTalentEnabled)}
@@ -321,9 +315,6 @@ function buildBattleTemplate(hidden = DEFAULT_BATTLE_HIDDEN, settings = DEFAULT_
 
 [Audio]
 DisableBattleVoices = ${boolText(hidden.disableBattleVoices)}
-
-[Debug]
-TraceMode = ${boolText(hidden.traceMode)}
 
 [General]
 Enabled = ${boolText(settings.battleTurboEnabled)}
@@ -390,6 +381,27 @@ async function ensureDoorstopLoader(filePath: string): Promise<void> {
   }
 }
 
+export async function removeLegacyArtifacts(gameRoot: string): Promise<void> {
+  const legacyPaths = [
+    path.join(gameRoot, 'LaunchGame.cmd'),
+    path.join(gameRoot, 'LongYinModControl.cmd'),
+    path.join(gameRoot, 'LongYinModControl.ps1'),
+    path.join(gameRoot, 'Play.cmd'),
+    path.join(gameRoot, 'RecoverGameWindow.cmd'),
+    path.join(gameRoot, 'RecoverGameWindow.ps1'),
+    path.join(gameRoot, 'BepInEx', 'plugins', 'LongYinGameplayTest.dll'),
+    path.join(gameRoot, 'BepInEx', 'plugins', 'LongYinMoneyProbe.dll.disabled'),
+    path.join(gameRoot, 'BepInEx', 'plugins', 'LongYinTraceData.dll'),
+    path.join(gameRoot, 'BepInEx', 'plugins', 'LongYinSkillTalentTracer.dll'),
+    path.join(gameRoot, 'BepInEx', 'config', 'codex.longyin.gameplaytest.cfg'),
+    path.join(gameRoot, 'BepInEx', 'config', 'codex.longyin.moneyprobe.cfg.disabled'),
+    path.join(gameRoot, 'BepInEx', 'config', 'codex.longyin.tracedata.cfg'),
+    path.join(gameRoot, 'BepInEx', 'config', 'codex.longyin.skilltalenttracer.cfg')
+  ];
+
+  await Promise.all(legacyPaths.map((filePath) => fs.rm(filePath, { recursive: true, force: true }).catch(() => undefined)));
+}
+
 function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
   return {
     lockStamina: input.lockStamina,
@@ -411,6 +423,9 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     craftRandomPickUpgrade: input.craftRandomPickUpgrade,
     drinkPlayerPowerCostMultiplier: clamp(input.drinkPlayerPowerCostMultiplier, 0, 999),
     drinkEnemyPowerCostMultiplier: clamp(input.drinkEnemyPowerCostMultiplier, 0, 999),
+    dialogMonthlyLimitMultiplier: clamp(input.dialogMonthlyLimitMultiplier, 0, 999),
+    dialogFastForwardEnabled: input.dialogFastForwardEnabled,
+    dialogFastForwardHotkey: normalizeHotkey(input.dialogFastForwardHotkey, DEFAULT_VISIBLE_SETTINGS.dialogFastForwardHotkey),
     dailySkillInsightChancePercent: Math.round(clamp(input.dailySkillInsightChancePercent, 0, 100)),
     dailySkillInsightExpPercent: clamp(input.dailySkillInsightExpPercent, 0, 999),
     dailySkillInsightUseRarityScaling: input.dailySkillInsightUseRarityScaling,
@@ -419,8 +434,6 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     skillTalentLevelThreshold: Math.round(clamp(input.skillTalentLevelThreshold, 1, 999)),
     skillTalentTierPointMultiplier: clamp(input.skillTalentTierPointMultiplier, 0.1, 999),
     skillTalentPlayerOnly: input.skillTalentPlayerOnly,
-    dialogMonthlyLimitMultiplier: clamp(input.dialogMonthlyLimitMultiplier, 0.1, 999),
-    traceMode: input.traceMode,
     freezeDate: input.freezeDate,
     freezeHotkey: normalizeHotkey(input.freezeHotkey, DEFAULT_VISIBLE_SETTINGS.freezeHotkey),
     outsideBattleSpeedHotkey: normalizeHotkey(
@@ -473,6 +486,21 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       'EnemyPowerCostMultiplier',
       DEFAULT_VISIBLE_SETTINGS.drinkEnemyPowerCostMultiplier
     ),
+    dialogMonthlyLimitMultiplier: readFloat(
+      text,
+      'MonthlyLimitMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.dialogMonthlyLimitMultiplier
+    ),
+    dialogFastForwardEnabled: readBool(
+      text,
+      'ForceAutoContinueEnabled',
+      DEFAULT_VISIBLE_SETTINGS.dialogFastForwardEnabled
+    ),
+    dialogFastForwardHotkey: readString(
+      text,
+      'ForceAutoContinueHotkey',
+      DEFAULT_VISIBLE_SETTINGS.dialogFastForwardHotkey
+    ),
     dailySkillInsightChancePercent: readInt(
       text,
       'HitChancePercent',
@@ -493,8 +521,6 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
     skillTalentLevelThreshold: DEFAULT_VISIBLE_SETTINGS.skillTalentLevelThreshold,
     skillTalentTierPointMultiplier: DEFAULT_VISIBLE_SETTINGS.skillTalentTierPointMultiplier,
     skillTalentPlayerOnly: DEFAULT_VISIBLE_SETTINGS.skillTalentPlayerOnly,
-    dialogMonthlyLimitMultiplier: DEFAULT_VISIBLE_SETTINGS.dialogMonthlyLimitMultiplier,
-    traceMode: readBool(text, 'TraceMode', DEFAULT_VISIBLE_SETTINGS.traceMode),
     freezeDate: readBool(text, 'FreezeDate', DEFAULT_VISIBLE_SETTINGS.freezeDate),
     freezeHotkey: readString(text, 'ToggleFreezeDateHotkey', DEFAULT_VISIBLE_SETTINGS.freezeHotkey),
     outsideBattleSpeedHotkey: readString(
@@ -511,19 +537,6 @@ function parseVisibleFromHorse(text: string | undefined, settings: VisibleSettin
   return {
     ...settings,
     horseStaminaMultiplier: readFloat(text, 'StaminaMultiplier', settings.horseStaminaMultiplier)
-  };
-}
-
-function parseVisibleFromTrace(text: string | undefined, settings: VisibleSettings): VisibleSettings {
-  const traceEnabled = readBool(text, 'Enabled', DEFAULT_TRACE_HIDDEN.enabled);
-  return {
-    ...settings,
-    traceMode: settings.traceMode || traceEnabled,
-    dialogMonthlyLimitMultiplier: readFloat(
-      text,
-      'MonthlyLimitMultiplier',
-      settings.dialogMonthlyLimitMultiplier
-    )
   };
 }
 
@@ -551,9 +564,9 @@ function parseVisibleFromBattle(text: string | undefined, settings: VisibleSetti
 
 export async function ensureGameFiles(gameRoot: string): Promise<void> {
   const paths = getGamePaths(gameRoot);
+  await removeLegacyArtifacts(gameRoot);
   await ensureConfigFile(paths.mainConfigPath, buildMainTemplate());
   await ensureConfigFile(paths.horseConfigPath, buildHorseTemplate());
-  await ensureConfigFile(paths.traceConfigPath, buildTraceTemplate());
   await ensureConfigFile(paths.skillConfigPath, buildSkillTemplate());
   await ensureConfigFile(paths.battleConfigPath, buildBattleTemplate());
   await ensureSteamAppIdFile(paths.steamAppIdPath);
@@ -566,13 +579,11 @@ export async function readVisibleSettings(gameRoot: string): Promise<VisibleSett
 
   const mainText = await readTextIfExists(paths.mainConfigPath);
   const horseText = await readTextIfExists(paths.horseConfigPath);
-  const traceText = await readTextIfExists(paths.traceConfigPath);
   const skillText = await readTextIfExists(paths.skillConfigPath);
   const battleText = await readTextIfExists(paths.battleConfigPath);
 
   let settings = parseVisibleFromMain(mainText);
   settings = parseVisibleFromHorse(horseText, settings);
-  settings = parseVisibleFromTrace(traceText, settings);
   settings = parseVisibleFromSkill(skillText, settings);
   settings = parseVisibleFromBattle(battleText, settings);
   return sanitizeVisibleSettings(settings);
@@ -585,7 +596,6 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
 
   const mainText = await ensureConfigFile(paths.mainConfigPath, buildMainTemplate());
   const horseText = await ensureConfigFile(paths.horseConfigPath, buildHorseTemplate());
-  const traceText = await ensureConfigFile(paths.traceConfigPath, buildTraceTemplate());
   const skillText = await ensureConfigFile(paths.skillConfigPath, buildSkillTemplate());
   const battleText = await ensureConfigFile(paths.battleConfigPath, buildBattleTemplate());
 
@@ -628,6 +638,26 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'EnemyPowerCostMultiplier',
     formatFloat(normalized.drinkEnemyPowerCostMultiplier)
   );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'DialogFlow',
+    'MonthlyLimitMultiplier',
+    formatFloat(normalized.dialogMonthlyLimitMultiplier)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'DialogFlow',
+    'ForceAutoContinueEnabled',
+    boolText(normalized.dialogFastForwardEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'DialogFlow',
+    'ForceAutoContinueHotkey',
+    normalized.dialogFastForwardHotkey
+  );
+  nextMain = upsertIniSectionValue(nextMain, 'DialogFlow', 'FastForwardSafetyEnabled', 'true');
+  nextMain = upsertIniSectionValue(nextMain, 'DialogFlow', 'FastForwardStuckFrames', '180');
   nextMain = upsertIniValue(nextMain, 'HitChancePercent', String(normalized.dailySkillInsightChancePercent));
   nextMain = upsertIniValue(nextMain, 'ExpPercent', formatFloat(normalized.dailySkillInsightExpPercent, 1));
   nextMain = upsertIniValue(nextMain, 'UseRarityScaling', boolText(normalized.dailySkillInsightUseRarityScaling));
@@ -636,7 +666,6 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'RealtimeIntervalSeconds',
     formatFloat(normalized.dailySkillInsightRealtimeIntervalSeconds, 1)
   );
-  nextMain = upsertIniValue(nextMain, 'TraceMode', boolText(normalized.traceMode));
   nextMain = upsertIniValue(nextMain, 'FreezeDate', boolText(normalized.freezeDate));
   nextMain = upsertIniValue(nextMain, 'ToggleFreezeDateHotkey', normalized.freezeHotkey);
   nextMain = upsertIniValue(nextMain, 'CycleOutsideBattleSpeedHotkey', normalized.outsideBattleSpeedHotkey);
@@ -645,15 +674,6 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   let nextHorse = horseText;
   nextHorse = upsertIniValue(nextHorse, 'StaminaMultiplier', formatFloat(normalized.horseStaminaMultiplier, 2));
   await writeTextFile(paths.horseConfigPath, nextHorse);
-
-  let nextTrace = traceText;
-  nextTrace = upsertIniValue(nextTrace, 'Enabled', boolText(normalized.traceMode));
-  nextTrace = upsertIniValue(
-    nextTrace,
-    'MonthlyLimitMultiplier',
-    formatFloat(normalized.dialogMonthlyLimitMultiplier, 1)
-  );
-  await writeTextFile(paths.traceConfigPath, nextTrace);
 
   let nextSkill = skillText;
   nextSkill = upsertIniValue(nextSkill, 'Enabled', boolText(normalized.skillTalentEnabled));

@@ -229,17 +229,13 @@ Remove-MatchingFiles -Root $targetRoot -Patterns @(
     ".doorstop_version",
     "doorstop_config.ini",
     "winhttp.dll",
-    "LaunchGame.cmd",
-    "LongYinModControl.cmd",
-    "LongYinModControl.ps1",
-    "Play.cmd",
     "Install.cmd",
     "Uninstall.cmd",
     "Uninstall.ps1",
     "run_this_first.cmd",
     "run_this_first.ps1",
     "README.md",
-    "安装与运行说明.md",
+    "INSTALL.md",
     "LongYin-Mod-Portable-*.zip",
     "LongYinPlus-InstallBundle-*.zip"
 )
