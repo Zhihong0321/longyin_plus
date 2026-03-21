@@ -295,6 +295,19 @@ function upsertIniSectionValue(text: string, section: string, key: string, value
   });
 }
 
+function getIniSectionBody(text: string | undefined, section: string): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+
+  const pattern = new RegExp(
+    `(?:^|\\r?\\n)\\s*\\[${escapeRegex(section)}\\]\\s*\\r?\\n([\\s\\S]*?)(?=\\r?\\n\\s*\\[[^\\]]+\\]\\s*\\r?\\n|$)`,
+    'i'
+  );
+  const match = text.match(pattern);
+  return match?.[1];
+}
+
 function buildMainTemplate(settings = DEFAULT_VISIBLE_SETTINGS, hidden = DEFAULT_MAIN_HIDDEN): string {
   return normalizeNewlines(`
 ## Settings file was created by LongYinPlus Electron
@@ -516,6 +529,10 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
 }
 
 function parseVisibleFromMain(text: string | undefined): VisibleSettings {
+  const dialogFlowSection = getIniSectionBody(text, 'DialogFlow');
+  const dailySkillInsightSection = getIniSectionBody(text, 'DailySkillInsight');
+  const timeSection = getIniSectionBody(text, 'Time');
+
   return {
     lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
     expMultiplier: readInt(text, 'ExpMultiplier', DEFAULT_VISIBLE_SETTINGS.expMultiplier),
@@ -557,33 +574,37 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       DEFAULT_VISIBLE_SETTINGS.drinkEnemyPowerCostMultiplier
     ),
     dialogMonthlyLimitMultiplier: readFloat(
-      text,
+      dialogFlowSection,
       'MonthlyLimitMultiplier',
       DEFAULT_VISIBLE_SETTINGS.dialogMonthlyLimitMultiplier
     ),
     dialogFastForwardEnabled: readBool(
-      text,
+      dialogFlowSection,
       'ForceAutoContinueEnabled',
       DEFAULT_VISIBLE_SETTINGS.dialogFastForwardEnabled
     ),
     dialogFastForwardHotkey: readString(
-      text,
+      dialogFlowSection,
       'ForceAutoContinueHotkey',
       DEFAULT_VISIBLE_SETTINGS.dialogFastForwardHotkey
     ),
     dailySkillInsightChancePercent: readInt(
-      text,
+      dailySkillInsightSection,
       'HitChancePercent',
       DEFAULT_VISIBLE_SETTINGS.dailySkillInsightChancePercent
     ),
-    dailySkillInsightExpPercent: readFloat(text, 'ExpPercent', DEFAULT_VISIBLE_SETTINGS.dailySkillInsightExpPercent),
+    dailySkillInsightExpPercent: readFloat(
+      dailySkillInsightSection,
+      'ExpPercent',
+      DEFAULT_VISIBLE_SETTINGS.dailySkillInsightExpPercent
+    ),
     dailySkillInsightUseRarityScaling: readBool(
-      text,
+      dailySkillInsightSection,
       'UseRarityScaling',
       DEFAULT_VISIBLE_SETTINGS.dailySkillInsightUseRarityScaling
     ),
     dailySkillInsightRealtimeIntervalSeconds: readFloat(
-      text,
+      dailySkillInsightSection,
       'RealtimeIntervalSeconds',
       DEFAULT_VISIBLE_SETTINGS.dailySkillInsightRealtimeIntervalSeconds
     ),
@@ -591,10 +612,10 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
     skillTalentLevelThreshold: DEFAULT_VISIBLE_SETTINGS.skillTalentLevelThreshold,
     skillTalentTierPointMultiplier: DEFAULT_VISIBLE_SETTINGS.skillTalentTierPointMultiplier,
     skillTalentPlayerOnly: DEFAULT_VISIBLE_SETTINGS.skillTalentPlayerOnly,
-    freezeDate: readBool(text, 'FreezeDate', DEFAULT_VISIBLE_SETTINGS.freezeDate),
-    freezeHotkey: readString(text, 'ToggleFreezeDateHotkey', DEFAULT_VISIBLE_SETTINGS.freezeHotkey),
+    freezeDate: readBool(timeSection, 'FreezeDate', DEFAULT_VISIBLE_SETTINGS.freezeDate),
+    freezeHotkey: readString(timeSection, 'ToggleFreezeDateHotkey', DEFAULT_VISIBLE_SETTINGS.freezeHotkey),
     outsideBattleSpeedHotkey: readString(
-      text,
+      timeSection,
       'CycleOutsideBattleSpeedHotkey',
       DEFAULT_VISIBLE_SETTINGS.outsideBattleSpeedHotkey
     ),
@@ -637,7 +658,7 @@ function diffVisibleSettings(expected: VisibleSettings, actual: VisibleSettings)
 
   for (const key of Object.keys(expected) as Array<keyof VisibleSettings>) {
     if (expected[key] !== actual[key]) {
-      mismatches.push(String(key));
+      mismatches.push(`${String(key)} (${String(expected[key])} -> ${String(actual[key])})`);
     }
   }
 
