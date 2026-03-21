@@ -21,14 +21,21 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
     private static ConfigEntry<float> _dialogMonthlyLimitMultiplier = null!;
     private static ConfigEntry<bool> _forceAutoContinueEnabled = null!;
     private static ConfigEntry<KeyCode> _forceAutoContinueHotkey = null!;
+    private static ConfigEntry<KeyCode> _forceUnstuckHotkey = null!;
+    private static ConfigEntry<bool> _fastForwardSafetyEnabled = null!;
+    private static ConfigEntry<int> _fastForwardStuckFrames = null!;
     private static readonly Dictionary<string, string> _dialogRequirementStateCache = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> _dialogChoiceRowStateCache = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> _dialogActionStateCache = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, int> _dialogMonthlyUseCounts = new(StringComparer.Ordinal);
     private static HeroData? _activeDialogHero;
     private static int _activeDialogHeroId = -1;
     private static int _activeDialogHeroForceLv = -1;
     private static string _activeDialogHeroName = string.Empty;
     private static bool _forceAutoContinueActive;
+    private static int _lastDialogProgressFrame = -1;
+    private static string _lastDialogProgressSignature = string.Empty;
+    private static string _lastDialogStuckSignature = string.Empty;
     private Harmony? _harmony;
 
     public override void Load()
@@ -36,37 +43,25 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
         LoggerInstance = Log;
         _treasureFlowEnabled = Config.Bind("TreasureFlow", "Enabled", true, "Logs only exploration treasure/chest flow for focused reverse-engineering.");
         _characterCreationFlowEnabled = Config.Bind("CharacterCreationFlow", "Enabled", false, "Logs character-creation button presses, point-cost queries, and point-pool changes.");
-        _dialogFlowEnabled = Config.Bind("DialogFlow", "Enabled", true, "Logs NPC dialog entry points, choice availability checks, and row grey-out state changes.");
-        _dialogMonthlyLimitMultiplier = Config.Bind("DialogFlow", "MonthlyLimitMultiplier", 3f, "Scales the monthly use limit for dialog choices that consume playerInteractionTimeNeed.");
+        _dialogFlowEnabled = Config.Bind("DialogFlow", "Enabled", true, "Logs NPC dialog entry points, choice availability checks, row state changes, and fast-forward transitions.");
+        _dialogMonthlyLimitMultiplier = Config.Bind("DialogFlow", "MonthlyLimitMultiplier", 3f, "Scales the per-NPC monthly dialog-use limit.");
         _forceAutoContinueEnabled = Config.Bind("DialogFlow", "ForceAutoContinueEnabled", true, "Forces dialog fast-forward when toggled on.");
         _forceAutoContinueHotkey = Config.Bind("DialogFlow", "ForceAutoContinueHotkey", KeyCode.P, "Hotkey used to toggle forced dialog fast-forward.");
+        _forceUnstuckHotkey = Config.Bind("DialogFlow", "EmergencyUnstuckHotkey", KeyCode.F12, "Hotkey that clears forced fast-forward and tries to release a wedged dialog/chest session.");
+        _fastForwardSafetyEnabled = Config.Bind("DialogFlow", "FastForwardSafetyEnabled", true, "Automatically disables forced fast-forward when a dialog appears stuck.");
+        _fastForwardStuckFrames = Config.Bind("DialogFlow", "FastForwardStuckFrames", 180, "How many frames a dialog may remain unchanged before the tracer treats it as stuck.");
         _forceAutoContinueActive = _forceAutoContinueEnabled.Value;
 
-        if (!_treasureFlowEnabled.Value && !_characterCreationFlowEnabled.Value && !_dialogFlowEnabled.Value)
+        if (!_dialogFlowEnabled.Value)
         {
-            Log.LogInfo("LongYin Trace Data loaded with all tracing disabled.");
+            Log.LogInfo("LongYin Trace Data loaded with dialog tracing disabled.");
             return;
         }
 
         _harmony = new Harmony("codex.longyin.tracedata");
 
-        if (_treasureFlowEnabled.Value)
-        {
-            RegisterTreasureFlowPatches();
-            Log.LogInfo("Focused treasure and plot-close tracing enabled.");
-        }
-
-        if (_characterCreationFlowEnabled.Value)
-        {
-            RegisterCharacterCreationFlowPatches();
-            Log.LogInfo("Focused character-creation tracing enabled.");
-        }
-
-        if (_dialogFlowEnabled.Value)
-        {
-            RegisterDialogFlowPatches();
-            Log.LogInfo("Focused dialog tracing enabled.");
-        }
+        RegisterDialogFlowPatches();
+        Log.LogInfo("Focused dialog fast-forward tracing enabled.");
 
         Log.LogInfo($"Trace session marker: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
     }
@@ -127,10 +122,18 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
         PatchMethod(typeof(PlotController), nameof(PlotController.SpeInteractWithNPC), Type.EmptyTypes, nameof(DialogFlowPrefix), nameof(DialogFlowPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckChoiceMeetRequire), new[] { typeof(Il2CppSystem.Collections.Generic.List<PlotChoiceRequirement>), typeof(bool) }, nameof(DialogRequirementPrefix), nameof(DialogRequirementPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckMeetRequire), new[] { typeof(ChoiceRequirementType), typeof(float), typeof(bool) }, nameof(DialogRequirementPrefix), nameof(DialogRequirementPostfix));
-        PatchMethod(typeof(PlotController), nameof(PlotController.Update), Type.EmptyTypes, nameof(DialogControllerUpdatePrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlotBackgroundClicked), Type.EmptyTypes, nameof(DialogActionPrefix), nameof(DialogActionPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.AutoPlotButtonClicked), Type.EmptyTypes, nameof(DialogActionPrefix), nameof(DialogActionPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.SkipPlotButtonClicked), Type.EmptyTypes, nameof(DialogActionPrefix), nameof(DialogActionPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.SetAutoPlot), new[] { typeof(bool) }, nameof(DialogActionPrefix), nameof(DialogActionPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.SetSkipPlot), new[] { typeof(bool) }, nameof(DialogActionPrefix), nameof(DialogActionPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlotTextShowFinished), Type.EmptyTypes, nameof(DialogActionPrefix), nameof(DialogActionPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlotChoiceShowFinished), Type.EmptyTypes, nameof(DialogActionPrefix), nameof(DialogActionPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.ChangeNextPlot), Type.EmptyTypes, nameof(DialogActionPrefix), nameof(DialogActionPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.GoNextPlot), Type.EmptyTypes, nameof(DialogActionPrefix), nameof(DialogActionPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.Update), Type.EmptyTypes, nameof(DialogControllerUpdatePrefix), nameof(DialogControllerUpdatePostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.Update), Type.EmptyTypes, nameof(DialogChoiceRowPrefix), nameof(DialogChoiceRowPostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.OnClick), Type.EmptyTypes, nameof(DialogChoiceClickPrefix), nameof(DialogChoiceClickPostfix));
-        PatchMethod(typeof(PlayerInteractionTimeData), nameof(PlayerInteractionTimeData.ResetTime), Type.EmptyTypes, null, nameof(PlayerInteractionTimeResetPostfix));
     }
 
     private void PatchMethod(Type type, string methodName, Type[] parameterTypes, string? prefixName, string? postfixName)
@@ -267,6 +270,7 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
         CacheActiveDialogContext(__args);
         __state = $"plot={DescribePlotController(__instance)}; args={DescribeArgs(__args)}";
         LoggerInstance.LogInfo($"DIALOG ENTER {DescribeMethod(__originalMethod)} {__state}");
+        MarkDialogProgress(__instance, DescribeMethod(__originalMethod));
     }
 
     private static void DialogFlowPostfix(MethodBase __originalMethod, PlotController? __instance, object[] __args, string __state)
@@ -279,12 +283,44 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
         LoggerInstance.LogInfo($"DIALOG EXIT  {DescribeMethod(__originalMethod)} before={__state}; after={DescribePlotController(__instance)}");
     }
 
-    private static void DialogControllerUpdatePrefix(PlotController? __instance)
+    private static void DialogActionPrefix(MethodBase __originalMethod, PlotController? __instance, object[] __args, out string __state)
     {
         if (__instance == null)
         {
+            __state = string.Empty;
             return;
         }
+
+        __state = $"plot={DescribePlotController(__instance)}; args={DescribeArgs(__args)}";
+        LoggerInstance.LogInfo($"DIALOG ACTION ENTER {DescribeMethod(__originalMethod)} {__state}");
+    }
+
+    private static void DialogActionPostfix(MethodBase __originalMethod, PlotController? __instance, object[] __args, string __state)
+    {
+        if (__instance == null || string.IsNullOrEmpty(__state))
+        {
+            return;
+        }
+
+        var after = DescribePlotController(__instance);
+        var summary = $"before={__state}; after={after}";
+        if (TryLogStateChange(_dialogActionStateCache, $"{DescribeMethod(__originalMethod)}|{DescribeArgs(__args)}", summary))
+        {
+            LoggerInstance.LogInfo($"DIALOG ACTION EXIT  {DescribeMethod(__originalMethod)} {summary}");
+        }
+
+        MarkDialogProgress(__instance, DescribeMethod(__originalMethod));
+    }
+
+    private static void DialogControllerUpdatePrefix(PlotController? __instance, out string __state)
+    {
+        if (__instance == null)
+        {
+            __state = string.Empty;
+            return;
+        }
+
+        __state = DescribePlotController(__instance);
 
         if (CheckForcedAutoContinueHotkey())
         {
@@ -299,7 +335,34 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
             }
         }
 
+        if (CheckEmergencyUnstuckHotkey())
+        {
+            TryEmergencyDialogRecovery(__instance);
+        }
+
         ApplyForcedAutoContinueIfNeeded(__instance, "PlotController.Update");
+    }
+
+    private static void DialogControllerUpdatePostfix(PlotController? __instance, string __state)
+    {
+        if (__instance == null)
+        {
+            return;
+        }
+
+        var after = DescribePlotController(__instance);
+        if (!string.IsNullOrEmpty(__state) && !string.Equals(__state, after, StringComparison.Ordinal))
+        {
+            var summary = $"before={__state}; after={after}";
+            if (TryLogStateChange(_dialogActionStateCache, "PlotController.Update", summary))
+            {
+                LoggerInstance.LogInfo($"DIALOG UPDATE {summary}");
+            }
+
+            MarkDialogProgress(__instance, "PlotController.Update");
+        }
+
+        CheckForFastForwardStuck(__instance);
     }
 
     private static void DialogRequirementPrefix(MethodBase __originalMethod, PlotController? __instance, object[] __args, out string __state)
@@ -395,6 +458,7 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
         ApplyDialogMonthlyQuota(__instance, __instance.choiceData, consume: true);
         __state = DescribeDialogChoiceRow(__instance, __instance.choiceData);
         LoggerInstance.LogInfo($"DIALOG CLICK ENTER {DescribeMethod(__originalMethod)} {__state}");
+        MarkDialogProgress(null, "PlotInteractController.OnClick");
     }
 
     private static void DialogChoiceClickPostfix(MethodBase __originalMethod, PlotInteractController? __instance, string __state)
@@ -406,11 +470,6 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
 
         var after = __instance == null || __instance.choiceData == null ? "choice=null" : DescribeDialogChoiceRow(__instance, __instance.choiceData);
         LoggerInstance.LogInfo($"DIALOG CLICK EXIT  {DescribeMethod(__originalMethod)} before={__state}; after={after}");
-    }
-
-    private static void PlayerInteractionTimeResetPostfix(PlayerInteractionTimeData? __instance)
-    {
-        // The custom per-NPC/month quota tracker now handles dialog limits directly.
     }
 
     private static bool CheckForcedAutoContinueHotkey()
@@ -425,6 +484,101 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
         }
     }
 
+    private static bool CheckEmergencyUnstuckHotkey()
+    {
+        try
+        {
+            return _forceUnstuckHotkey != null && Input.GetKeyDown(_forceUnstuckHotkey.Value);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void TryEmergencyDialogRecovery(PlotController? controller)
+    {
+        LoggerInstance.LogWarning($"EMERGENCY DIALOG RECOVERY requested; before={DescribePlotController(controller)}");
+
+        _forceAutoContinueActive = false;
+
+        if (controller != null)
+        {
+            try
+            {
+                controller.SetAutoPlot(false);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                controller.SetSkipPlot(false);
+            }
+            catch
+            {
+            }
+
+            controller.plotAutoing = false;
+            controller.plotSkipping = false;
+        }
+
+        if (TryClearTreasureChestChoiceSession())
+        {
+            LoggerInstance.LogWarning("EMERGENCY DIALOG RECOVERY cleared treasure chest choice session.");
+        }
+
+        LoggerInstance.LogWarning($"EMERGENCY DIALOG RECOVERY completed; after={DescribePlotController(controller)}");
+    }
+
+    private static bool TryClearTreasureChestChoiceSession()
+    {
+        try
+        {
+            var assembly = AppDomain.CurrentDomain.GetAssemblies();
+            foreach (var candidateAssembly in assembly)
+            {
+                Type? sessionType = null;
+                try
+                {
+                    sessionType = candidateAssembly.GetType("LongYinStaminaLockPlugin", throwOnError: false, ignoreCase: false);
+                }
+                catch
+                {
+                }
+
+                if (sessionType == null)
+                {
+                    continue;
+                }
+
+                var field = sessionType.GetField("_activeTreasureChestChoiceSession", BindingFlags.Static | BindingFlags.NonPublic);
+                if (field == null)
+                {
+                    continue;
+                }
+
+                var session = field.GetValue(null);
+                if (session == null)
+                {
+                    return false;
+                }
+
+                TrySetMemberValue(session, "Resolved", true);
+                TrySetMemberValue(session, "PendingClickConfirm", false);
+                TrySetMemberValue(session, "PendingClickConfirmFrames", 0);
+                field.SetValue(null, null);
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
     private static void ApplyForcedAutoContinueIfNeeded(PlotController? controller, string source)
     {
         if (controller == null || !_forceAutoContinueEnabled.Value || !_forceAutoContinueActive)
@@ -432,9 +586,27 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
             return;
         }
 
-        if (!controller.plotChoiceShowing && !controller.plotTextShowing && !controller.plotAutoing)
+        var activeChoice = controller.newChoice ?? controller.nowChoice;
+        if (controller.plotChoiceShowing || activeChoice != null)
+        {
+            if (controller.plotSkipping)
+            {
+                LoggerInstance.LogInfo($"FORCE FAST FORWARD RELEASE source={source}; before={DescribePlotController(controller)}");
+                controller.SetSkipPlot(false);
+                controller.plotSkipping = false;
+            }
+
+            return;
+        }
+
+        if (!controller.plotTextShowing && !controller.plotAutoing)
         {
             return;
+        }
+
+        if (!controller.plotSkipping)
+        {
+            LoggerInstance.LogInfo($"FORCE FAST FORWARD APPLY source={source}; before={DescribePlotController(controller)}");
         }
 
         controller.SetSkipPlot(true);
@@ -442,6 +614,227 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
         if (!controller.plotSkipping)
         {
             controller.plotSkipping = true;
+        }
+    }
+
+    private static void MarkDialogProgress(PlotController? controller, string source)
+    {
+        _lastDialogProgressFrame = Time.frameCount;
+        if (controller != null)
+        {
+            _lastDialogProgressSignature = DescribePlotController(controller);
+        }
+        else if (string.IsNullOrEmpty(_lastDialogProgressSignature))
+        {
+            _lastDialogProgressSignature = source;
+        }
+
+        _lastDialogStuckSignature = string.Empty;
+
+        if (!string.IsNullOrEmpty(source))
+        {
+            LoggerInstance.LogInfo($"DIALOG PROGRESS source={source}; frame={Time.frameCount}; snapshot={_lastDialogProgressSignature}");
+        }
+    }
+
+    private static void CheckForFastForwardStuck(PlotController controller)
+    {
+        if (!_forceAutoContinueEnabled.Value || !_forceAutoContinueActive)
+        {
+            return;
+        }
+
+        if (!IsDialogOpen(controller))
+        {
+            return;
+        }
+
+        if (_lastDialogProgressFrame < 0)
+        {
+            _lastDialogProgressFrame = Time.frameCount;
+            _lastDialogProgressSignature = DescribePlotController(controller);
+            return;
+        }
+
+        var framesSinceProgress = Time.frameCount - _lastDialogProgressFrame;
+        if (framesSinceProgress < _fastForwardStuckFrames.Value)
+        {
+            return;
+        }
+
+        var stuckSignature = DescribePlotController(controller);
+        if (string.Equals(_lastDialogStuckSignature, stuckSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastDialogStuckSignature = stuckSignature;
+        LoggerInstance.LogWarning(
+            $"DIALOG STUCK detected at frame={Time.frameCount}; framesSinceProgress={framesSinceProgress}; " +
+            $"forceFastForwardActive={_forceAutoContinueActive}; plot={stuckSignature}; hero={DescribeHero(_activeDialogHero)}; " +
+            $"controllerFields={DescribeInterestingFields(controller)}; controllerTree={DescribeGameObjectTree(controller.gameObject, 2, 24)}");
+
+        if (_fastForwardSafetyEnabled.Value)
+        {
+            _forceAutoContinueActive = false;
+            controller.SetSkipPlot(false);
+            controller.plotSkipping = false;
+            LoggerInstance.LogWarning("FORCE FAST FORWARD SAFETY OFF after stuck dialog detection.");
+        }
+    }
+
+    private static bool IsDialogOpen(PlotController controller)
+    {
+        return controller.plotHappen || controller.plotChoiceShowing || controller.plotTextShowing;
+    }
+
+    private static string DescribeInterestingFields(object? target)
+    {
+        if (target == null)
+        {
+            return "fields=null";
+        }
+
+        try
+        {
+            var fields = target.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            var parts = new List<string>();
+            foreach (var field in fields)
+            {
+                if (!ShouldDescribeField(field))
+                {
+                    continue;
+                }
+
+                parts.Add($"{field.Name}={DescribeFieldValue(field.GetValue(target))}");
+                if (parts.Count >= 24)
+                {
+                    break;
+                }
+            }
+
+            return parts.Count > 0 ? string.Join(", ", parts) : "fields=none";
+        }
+        catch
+        {
+            return "fields=unavailable";
+        }
+    }
+
+    private static bool ShouldDescribeField(FieldInfo field)
+    {
+        try
+        {
+            var name = field.Name.ToLowerInvariant();
+            if (name.Contains("continue") ||
+                name.Contains("skip") ||
+                name.Contains("auto") ||
+                name.Contains("next") ||
+                name.Contains("choice") ||
+                name.Contains("dialog") ||
+                name.Contains("plot") ||
+                name.Contains("button") ||
+                name.Contains("text") ||
+                name.Contains("ui"))
+            {
+                return true;
+            }
+
+            var fieldType = field.FieldType;
+            return fieldType.IsPrimitive || fieldType.IsEnum || fieldType == typeof(string) || typeof(UnityEngine.Object).IsAssignableFrom(fieldType);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string DescribeFieldValue(object? value)
+    {
+        if (value == null)
+        {
+            return "null";
+        }
+
+        if (value is GameObject gameObject)
+        {
+            return DescribeGameObject(gameObject);
+        }
+
+        if (value is Component component)
+        {
+            return $"{component.GetType().Name}(go={SafeFormatValue(component.gameObject?.name)})";
+        }
+
+        if (value is System.Collections.IEnumerable enumerable && value is not string)
+        {
+            return DescribeEnumerable(enumerable);
+        }
+
+        return SafeFormatValue(value);
+    }
+
+    private static string DescribeEnumerable(System.Collections.IEnumerable enumerable)
+    {
+        var count = 0;
+        var preview = new List<string>();
+        foreach (var item in enumerable)
+        {
+            count++;
+            if (preview.Count < 6)
+            {
+                preview.Add(SafeFormatValue(item));
+            }
+        }
+
+        return $"count={count}, items=[{string.Join(" | ", preview)}]";
+    }
+
+    private static string DescribeGameObjectTree(GameObject root, int maxDepth, int maxNodes)
+    {
+        try
+        {
+            var nodes = new List<string>();
+
+            void Walk(Transform? transform, int depth)
+            {
+                if (transform == null || nodes.Count >= maxNodes || depth > maxDepth)
+                {
+                    return;
+                }
+
+                var gameObject = transform.gameObject;
+                var node = $"{new string('>', depth)}{SafeFormatValue(gameObject.name)}[active={gameObject.activeSelf}/{gameObject.activeInHierarchy}]";
+                var readableText = TryGetReadableText(gameObject);
+                if (!string.IsNullOrEmpty(readableText))
+                {
+                    node += $", text={SafeFormatValue(readableText)}";
+                }
+
+                var buttonInfo = TryDescribeComponentMembers(gameObject, "UIButtonMessage", "functionName", "trigger", "target");
+                if (!string.IsNullOrEmpty(buttonInfo))
+                {
+                    node += $", button={buttonInfo}";
+                }
+
+                nodes.Add(node);
+
+                foreach (Transform child in transform)
+                {
+                    Walk(child, depth + 1);
+                    if (nodes.Count >= maxNodes)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            Walk(root.transform, 0);
+            return nodes.Count > 0 ? string.Join(" | ", nodes) : "tree=empty";
+        }
+        catch
+        {
+            return "tree=unavailable";
         }
     }
 
@@ -604,7 +997,7 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
 
         return
             $"plotHappen={controller.plotHappen}, plotChoiceShowing={controller.plotChoiceShowing}, plotTextShowing={controller.plotTextShowing}, " +
-            $"plotAutoing={controller.plotAutoing}, nowChoice={DescribePlotChoice(controller.nowChoice)}, newChoice={DescribePlotChoice(controller.newChoice)}, " +
+            $"plotAutoing={controller.plotAutoing}, plotSkipping={controller.plotSkipping}, nowChoice={DescribePlotChoice(controller.nowChoice)}, newChoice={DescribePlotChoice(controller.newChoice)}, " +
             $"plotInteractItem={DescribeItem(controller.plotInteractItem)}, plotInteractItemTempRecord={DescribeItem(controller.plotInteractItemTempRecord)}";
     }
 
@@ -1320,6 +1713,32 @@ public sealed class LongYinTraceDataPlugin : BasePlugin
             if (method != null)
             {
                 method.Invoke(list, new object[] { index, value });
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    private static bool TrySetMemberValue(object target, string memberName, object? value)
+    {
+        try
+        {
+            var type = target.GetType();
+            var property = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (property != null && property.CanWrite)
+            {
+                property.SetValue(target, value, null);
+                return true;
+            }
+
+            var field = type.GetField(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null)
+            {
+                field.SetValue(target, value);
                 return true;
             }
         }

@@ -44,6 +44,16 @@ function matchesPattern(value: string, pattern: string): boolean {
   return new RegExp(`^${escaped}$`, 'i').test(normalizedValue);
 }
 
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
+  }
+  catch {
+    return false;
+  }
+}
+
 async function directoryExists(dirPath: string): Promise<boolean> {
   try {
     const stat = await fs.stat(dirPath);

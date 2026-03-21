@@ -437,10 +437,10 @@ function registerIpc(): void {
       throw new Error('请先选择游戏目录。');
     }
 
-    await installPayload(gameRoot);
-    return {
-      ok: true,
-      message: '模组载荷已安装。',
+        await installPayload(gameRoot);
+        return {
+          ok: true,
+          message: '模组载荷已安装。',
       gameRoot,
       updatedSnapshot: await buildSnapshot('已安装。')
     } satisfies OperationResult;
@@ -465,14 +465,14 @@ function registerIpc(): void {
       throw new Error('请先选择游戏目录。');
     }
 
-    await launchGame(gameRoot);
-    return {
-      ok: true,
-      message: '已发送启动请求。BepInEx 载入可能需要 10 到 20 秒，请不要重复点击。',
-      gameRoot,
-      updatedSnapshot: await buildSnapshot('启动中。')
-    } satisfies OperationResult;
-  });
+        await launchGame(gameRoot);
+        return {
+          ok: true,
+          message: '已发送启动请求。BepInEx 载入可能需要 10 到 20 秒，请不要重复点击。',
+          gameRoot,
+          updatedSnapshot: await buildSnapshot('启动中。')
+        } satisfies OperationResult;
+      });
   ipcMain.handle('app:save-and-launch', async (_event, settings: VisibleSettings) => {
     const snapshot = await saveSettingsAndRefresh(settings);
     if (!snapshot.gameRoot) {

@@ -1,6 +1,6 @@
 # 龙胤立志传 Pro Max 模组仓库
 
-这是 `LongYinLiZhiZhuan` 的便携式模组仓库，方便你把模组项目保留在 GitHub 上，而不需要上传游戏本体。
+这是 `LongYinLiZhiZhuan` 的便携式模组仓库，便于通过 GitHub 管理模组与 Electron 启动器，而不上传游戏本体。
 
 ## 仓库内容
 
@@ -38,7 +38,7 @@
 3. 双击 `Install.cmd`。
 4. 如果能自动识别到游戏目录，安装器会把 `dist/` 复制到游戏根目录。
 5. 如果自动识别失败，请手动选择包含 `LongYinLiZhiZhuan.exe` 的文件夹。
-6. 安装完成后，建议启动 `electron-app/` 里的 `龙胤立志传 Pro Max.exe` 使用新的中文界面；旧版 PowerShell 界面仍可通过 `Play.cmd` 兼容启动。
+6. 安装完成后，优先运行 `electron-app/` 里的 `龙胤立志传 Pro Max.exe` 使用新的中文界面；`Play.cmd` 仍可作为兼容入口。
 7. 如果之后需要卸载模组，请运行 `Uninstall.cmd`。
 
 ## 下载
@@ -47,11 +47,7 @@
 
 - [最新稳定版下载](https://github.com/Zhihong0321/longyin_plus/releases/latest)
 
-如果 Releases 还没有显示，也可以使用仓库直链：
-
-- 如果你已经有仓库 ZIP，也可以直接解压后使用；正式对外下载建议使用 Releases 页面里的最新 ZIP。
-
-下载 ZIP 后，解压到任意位置，然后双击 `Install.cmd`。同一个包里也包含 `Uninstall.cmd`，方便后续干净卸载。
+下载 Release ZIP 后，解压到任意位置，然后双击 `Install.cmd`。同一个包里也包含 `Uninstall.cmd`，方便后续干净卸载。
 安装器还会清除复制到游戏目录中的 Windows 下载标记，这样首次启动时能减少 Defender 云扫描弹窗。
 
 ## 标准 OTA 发布

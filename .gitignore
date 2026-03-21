@@ -2,6 +2,7 @@
 
 # Temporary and generated build output
 mod-prototype/dist/
+mod-prototype/release-build/
 mod-prototype/_codex_temp_reflect/
 mod-prototype/*/artifacts/
 mod-prototype/mod-prototype/

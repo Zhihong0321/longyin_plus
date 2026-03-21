@@ -58,7 +58,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<float> _debatePlayerDamageTakenMultiplier = null!;
     private static ConfigEntry<float> _debateEnemyDamageTakenMultiplier = null!;
     private static ConfigEntry<bool> _craftRandomPickUpgradeEnabled = null!;
-    private static ConfigEntry<bool> _craftOneDayCraftingEnabled = null!;
     private static ConfigEntry<float> _drinkPlayerPowerCostMultiplier = null!;
     private static ConfigEntry<float> _drinkEnemyPowerCostMultiplier = null!;
     private static ConfigEntry<int> _dailySkillInsightHitChancePercent = null!;
@@ -90,10 +89,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static float _lastDrinkPlayerFillAmount = float.NaN;
     private static float _lastDrinkEnemyFillAmount = float.NaN;
     private static bool? _lastResolvedDrinkTargetIsPlayer;
-    private static bool _normalCraftDayClampActive;
-    private static int _normalCraftAllowedDayCalls;
-    private static int _normalCraftAllowedHourCalls;
-    private static int _normalCraftBlockedDayCalls;
     private Harmony? _harmony;
 
     private sealed class MoneyChangeState
@@ -179,7 +174,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _debatePlayerDamageTakenMultiplier = Config.Bind("Debate", "PlayerDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the player side when a round is lost.");
         _debateEnemyDamageTakenMultiplier = Config.Bind("Debate", "EnemyDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the enemy side when a round is won.");
         _craftRandomPickUpgradeEnabled = Config.Bind("Craft", "RandomPickUpgrade", true, "Uses the picked craft result as the base item, then regenerates it toward the next major tier.");
-        _craftOneDayCraftingEnabled = Config.Bind("Craft", "OneDayCrafting", true, "When true, normal crafting only advances 1 in-game day even if the recipe would normally take longer.");
         _drinkPlayerPowerCostMultiplier = Config.Bind("Drink", "PlayerPowerCostMultiplier", 1f, "Multiplies Qi cost paid by the player side during the drinking minigame.");
         _drinkEnemyPowerCostMultiplier = Config.Bind("Drink", "EnemyPowerCostMultiplier", 1f, "Multiplies Qi cost paid by the enemy side during the drinking minigame.");
         _dailySkillInsightHitChancePercent = Config.Bind("DailySkillInsight", "HitChancePercent", 0, "Chance from 0 to 100 that each elapsed in-game day grants bonus skill EXP to one eligible martial skill.");
@@ -227,9 +221,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData), typeof(int), typeof(int), typeof(bool), typeof(bool), typeof(float), typeof(float) }, null, nameof(ShowTradeUiFullPostfix));
         PatchMethod(typeof(DebateUIController), nameof(DebateUIController.ChangePatient), new[] { typeof(bool), typeof(float) }, nameof(DebateChangePatientPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.CraftResultChoosen), new[] { typeof(ItemData) }, nameof(CraftResultChoosenPrefix), null);
-        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.CraftButtonClicked), Type.EmptyTypes, nameof(CraftButtonClickedPrefix), null);
-        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ShowCraftResultChoosePanel), Type.EmptyTypes, null, nameof(CraftResultChoosePanelPostfix));
-        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, null, nameof(CraftHideUiPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.ShowDrinkUI), new[] { typeof(DrinkType), typeof(HeroData), typeof(ItemData), typeof(string) }, null, nameof(DrinkShowUiPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.GetDrinkCost), new[] { typeof(float) }, null, nameof(DrinkGetCostPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.HideDrinkUI), Type.EmptyTypes, null, nameof(DrinkHideUiPostfix));
@@ -267,7 +258,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Debate player damage taken multiplier starts at x{FormatConfigFloat(_debatePlayerDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Debate enemy damage taken multiplier starts at x{FormatConfigFloat(_debateEnemyDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Craft picked-result major-tier upgrade starts {(_craftRandomPickUpgradeEnabled.Value ? "ON" : "OFF")}.");
-        Log.LogInfo($"Craft one-day clamp starts {(_craftOneDayCraftingEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Drink player Qi cost multiplier starts at x{FormatConfigFloat(_drinkPlayerPowerCostMultiplier.Value)}.");
         Log.LogInfo($"Drink enemy Qi cost multiplier starts at x{FormatConfigFloat(_drinkEnemyPowerCostMultiplier.Value)}.");
         Log.LogInfo(
@@ -1225,21 +1215,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
     }
 
-    private static void CraftButtonClickedPrefix()
-    {
-        BeginNormalCraftDayClamp("CraftUI.CraftButtonClicked");
-    }
-
-    private static void CraftResultChoosePanelPostfix()
-    {
-        EndNormalCraftDayClamp("CraftUI.ShowCraftResultChoosePanel");
-    }
-
-    private static void CraftHideUiPostfix()
-    {
-        EndNormalCraftDayClamp("CraftUI.HideCraftUI");
-    }
-
     private static void DrinkShowUiPostfix(DrinkUIController __instance)
     {
         ResetDrinkTracking(__instance);
@@ -1406,7 +1381,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return false;
         }
 
-        return !ShouldBlockExtraCraftDayChange(__originalMethod, __state.BeforeText);
+        return true;
     }
 
     private static void CalendarChangePostfix(MethodBase __originalMethod, object[] __args, CalendarChangeState __state)
@@ -1429,7 +1404,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             LoggerInstance.LogInfo($"TRACE TIME ENTER {DescribeMethod(__originalMethod)} dateBefore={__state} args={DescribeArgs(__args)}");
         }
 
-        return !ShouldSkipCraftHourChange(__originalMethod, __args, __state);
+        return true;
     }
 
     private static void HourChangePostfix(MethodBase __originalMethod, object[] __args, string __state)
@@ -1438,109 +1413,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         {
             LoggerInstance.LogInfo($"TRACE TIME EXIT  {DescribeMethod(__originalMethod)} dateBefore={__state} dateAfter={GetWorldDateText(includeHour: true)}");
         }
-    }
-
-    private static void BeginNormalCraftDayClamp(string source)
-    {
-        if (!_craftOneDayCraftingEnabled.Value && !_freezeDate.Value)
-        {
-            return;
-        }
-
-        _normalCraftDayClampActive = true;
-        _normalCraftAllowedDayCalls = 1;
-        _normalCraftAllowedHourCalls = _freezeDate.Value ? 0 : 1;
-        _normalCraftBlockedDayCalls = 0;
-
-        if (_traceMode.Value)
-        {
-            LoggerInstance.LogInfo($"Craft one-day clamp armed from {source}.");
-        }
-    }
-
-    private static void EndNormalCraftDayClamp(string source)
-    {
-        if (!_normalCraftDayClampActive && _normalCraftAllowedDayCalls == 0 && _normalCraftBlockedDayCalls == 0)
-        {
-            return;
-        }
-
-        if (_traceMode.Value)
-        {
-            LoggerInstance.LogInfo(
-                $"Craft one-day clamp cleared from {source}: remainingAllowed={_normalCraftAllowedDayCalls}, blockedExtraDays={_normalCraftBlockedDayCalls}.");
-        }
-
-        _normalCraftDayClampActive = false;
-        _normalCraftAllowedDayCalls = 0;
-        _normalCraftAllowedHourCalls = 0;
-        _normalCraftBlockedDayCalls = 0;
-    }
-
-    private static bool ShouldBlockExtraCraftDayChange(MethodBase method, string beforeText)
-    {
-        if (!_craftOneDayCraftingEnabled.Value || !_normalCraftDayClampActive)
-        {
-            return false;
-        }
-
-        if (method.Name != nameof(GameController.ChangeDay) && method.Name != nameof(GameController.ChangeDayDirect))
-        {
-            return false;
-        }
-
-        if (_normalCraftAllowedDayCalls > 0)
-        {
-            _normalCraftAllowedDayCalls--;
-
-            if (_traceMode.Value)
-            {
-                LoggerInstance.LogInfo($"Craft one-day clamp allowed {DescribeMethod(method)} at {beforeText}.");
-            }
-
-            return false;
-        }
-
-        _normalCraftBlockedDayCalls++;
-
-        if (_traceMode.Value)
-        {
-            LoggerInstance.LogInfo($"Craft one-day clamp blocked extra {DescribeMethod(method)} at {beforeText}.");
-        }
-
-        return true;
-    }
-
-    private static bool ShouldSkipCraftHourChange(MethodBase method, object[] args, string beforeText)
-    {
-        if (!_normalCraftDayClampActive || method.Name != nameof(GameController.ChangeHour))
-        {
-            return false;
-        }
-
-        if (args.Length > 0 && args[0] is float hours && hours <= 0f)
-        {
-            return false;
-        }
-
-        if (_normalCraftAllowedHourCalls > 0)
-        {
-            _normalCraftAllowedHourCalls--;
-
-            if (_traceMode.Value)
-            {
-                LoggerInstance.LogInfo($"Craft hour clamp allowed {DescribeMethod(method)} at {beforeText}.");
-            }
-
-            return false;
-        }
-
-        if (_traceMode.Value)
-        {
-            LoggerInstance.LogInfo($"Craft hour clamp blocked extra {DescribeMethod(method)} at {beforeText}.");
-        }
-
-        return true;
     }
 
     private static void GameControllerUpdatePostfix()

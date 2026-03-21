@@ -465,6 +465,17 @@ Latest trace-data behavior:
 
 - the forced dialog continue hook now behaves like a fast-forward toggle
 - it skips dialog pacing instead of forcing auto-plot state changes
+- if forced fast-forward can wedge a dialog, trace `PlotController.Update`, `SetSkipPlot`, `SetAutoPlot`, `PlotTextShowFinished`, `PlotChoiceShowFinished`, `ChangeNextPlot`, and `GoNextPlot`
+- the current safety fallback is to disable forced skip after several unchanged frames of open dialog; watch `plotHappen`, `plotChoiceShowing`, `plotTextShowing`, `plotAutoing`, and `plotSkipping`
+- `SetSkipPlot(true)` is the critical fast-forward call; `SetAutoPlot(true)` is a different path and should stay out of the fast-forward-only feature
+- useful stuck-dialog logging should include the controller field dump and the controller game object tree so hidden continue/next UI can be spotted
+- forced fast-forward can wedge on treasure/dig choice branches such as `ChooseDigTreasure`; in that case, a branch-level guard is better than only turning skip off temporarily because `PlotController.Update` may reapply it on the next frame
+- the same family of wedge also appears on lock-chest choice branches such as `OpenLockChest`; keep these treasure-choice call paths out of the forced skip reapply logic
+- if a dialog has an active choice object (`nowChoice` or `newChoice`), do not force skip at all; this preserves the normal exit choice for city greetings and other choice-driven dialogs that can otherwise lose their "bye bye" option
+- even better than “do not force skip” is to explicitly release skip when a choice UI appears, because a stale skip state can survive into the choice screen and suppress the exit choice even if the reapply logic is already blocked
+- when a treasure-chest session is already active, the log can show `Skipped treasure chest choice because another chest choice session is already active.`; that is a separate lockup family from the text-only fast-forward wedge
+- manual rescue key: `DialogFlow/EmergencyUnstuckHotkey` clears forced fast-forward, turns off auto/skip on the current `PlotController`, and tries to release the active treasure-chest session so a wedged dialog can recover
+- keep the rescue key separate from the normal `P` fast-forward toggle; the rescue path is for emergencies, not as the default dialog control
 
 ## Build / Deploy Commands
 
