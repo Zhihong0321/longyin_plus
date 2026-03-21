@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "strict": true,
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "baseUrl": "."
+  },
+  "include": [
+    "src/renderer/**/*.tsx",
+    "src/renderer/**/*.ts",
+    "src/shared/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "release"
+  ]
+}

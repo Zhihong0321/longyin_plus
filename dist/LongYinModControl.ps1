@@ -723,7 +723,7 @@ $availableHotkeys = @("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10
 $availableBattleTurboHotkeys = @("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Insert", "Home", "PageUp", "Delete", "End", "PageDown", "Pause", "BackQuote", "Mouse3", "Mouse4", "Mouse5")
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "LongYin Mod Control"
+$form.Text = "龙胤立志传 Pro Max"
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
@@ -732,7 +732,7 @@ $form.ClientSize = New-Object System.Drawing.Size(640, 760)
 $form.BackColor = [System.Drawing.Color]::FromArgb(248, 244, 236)
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = "LongYin Mod Control"
+$title.Text = "龙胤立志传 Pro Max"
 $title.Font = New-Object System.Drawing.Font("Segoe UI", 18, [System.Drawing.FontStyle]::Bold)
 $title.AutoSize = $true
 $title.Location = New-Object System.Drawing.Point(22, 16)
@@ -1536,7 +1536,7 @@ $saveAction = {
 
 $launchAction = {
     if (-not (Test-Path $gameExePath)) {
-        [System.Windows.Forms.MessageBox]::Show("Game executable not found at:`r`n$gameExePath", "LongYin Mod Control")
+[System.Windows.Forms.MessageBox]::Show("未找到游戏可执行文件：`r`n$gameExePath", "龙胤立志传 Pro Max")
         return
     }
 

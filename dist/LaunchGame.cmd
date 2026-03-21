@@ -3,7 +3,7 @@ setlocal
 
 set "ROOT=%~dp0"
 if not exist "%ROOT%LongYinLiZhiZhuan.exe" (
-    echo Game executable not found:
+    echo 未找到游戏可执行文件：
     echo "%ROOT%LongYinLiZhiZhuan.exe"
     pause
     exit /b 1
