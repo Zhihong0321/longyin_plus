@@ -199,7 +199,7 @@ function Invoke-GitHubUpload {
     'X-GitHub-Api-Version' = '2022-11-28'
   }
 
-  $targetUrl = "$UploadUrl?name=$([uri]::EscapeDataString($AssetName))"
+  $targetUrl = $UploadUrl + '?name=' + [uri]::EscapeDataString($AssetName)
   Invoke-RestMethod -Method Post -Uri $targetUrl -Headers $headers -InFile $FilePath -ContentType 'application/octet-stream' -ErrorAction Stop | Out-Null
 }
 

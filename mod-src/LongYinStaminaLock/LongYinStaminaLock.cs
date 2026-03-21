@@ -9,7 +9,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.10")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.11")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -105,6 +105,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static string _lastDialogObservedSignature = string.Empty;
     private static string _lastDialogStuckSignature = string.Empty;
     private static float _nextDialogFastForwardPulseAt = -1f;
+    private static readonly List<KungfuSkillLvData> _dailySkillInsightCandidateBuffer = new();
     private Harmony? _harmony;
 
     private sealed class MoneyChangeState
@@ -329,7 +330,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     {
         if (_lockExploreStamina.Value && num < 0)
         {
-            LoggerInstance.LogInfo($"Blocked exploration stamina change {num}.");
             num = 0;
         }
     }
@@ -1692,8 +1692,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return;
         }
 
-        var activeChoice = controller.newChoice ?? controller.nowChoice;
-        if (controller.plotChoiceShowing || activeChoice != null)
+        if (HasBlockingDialogChoice(controller))
         {
             if (controller.plotAutoing)
             {
@@ -1719,6 +1718,22 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         EnsureForcedAutoContinueState(controller);
         TryPulseForcedAutoContinue(controller);
+    }
+
+    private static bool HasBlockingDialogChoice(PlotController controller)
+    {
+        if (controller.plotChoiceShowing)
+        {
+            return true;
+        }
+
+        if (controller.plotTextShowing)
+        {
+            return false;
+        }
+
+        return !string.IsNullOrWhiteSpace(TryGetChoiceParam(controller.newChoice))
+            || !string.IsNullOrWhiteSpace(TryGetChoiceParam(controller.nowChoice));
     }
 
     private static void EnsureForcedAutoContinueState(PlotController controller)
@@ -3674,8 +3689,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return;
         }
 
-        var eligibleSkills = GetDailySkillInsightCandidates(player);
-        if (eligibleSkills.Count == 0)
+        FillDailySkillInsightCandidates(player, _dailySkillInsightCandidateBuffer);
+        if (_dailySkillInsightCandidateBuffer.Count == 0)
         {
             if (_traceMode.Value)
             {
@@ -3685,7 +3700,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return;
         }
 
-        if (!TryAwardDailySkillInsightExp(player, eligibleSkills, out var skillName, out var awardedExp, out var usedSkill))
+        if (!TryAwardDailySkillInsightExp(player, _dailySkillInsightCandidateBuffer, out var skillName, out var awardedExp, out var usedSkill))
         {
             if (_traceMode.Value)
             {
@@ -3697,19 +3712,29 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         var skillTierText = GetSkillTierText(usedSkill);
         PushPlayerLog($"【心得涌现】：【{skillTierText}{skillName}】获得 {FormatInsightExp(awardedExp)} 经验值");
-        LoggerInstance.LogInfo($"Realtime skill insight applied: interval={intervalSeconds:0.###}s, skill={skillName}, exp={SafeFormatValue(awardedExp)}.");
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo($"Realtime skill insight applied: interval={intervalSeconds:0.###}s, skill={skillName}, exp={SafeFormatValue(awardedExp)}.");
+        }
     }
 
     private static List<KungfuSkillLvData> GetDailySkillInsightCandidates(HeroData player)
     {
         var candidates = new List<KungfuSkillLvData>();
+        FillDailySkillInsightCandidates(player, candidates);
+        return candidates;
+    }
+
+    private static void FillDailySkillInsightCandidates(HeroData player, List<KungfuSkillLvData> candidates)
+    {
+        candidates.Clear();
 
         try
         {
             var skills = player.kungfuSkills;
             if (skills == null)
             {
-                return candidates;
+                return;
             }
 
             for (var i = 0; i < skills.Count; i++)
@@ -3732,8 +3757,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         {
             LoggerInstance.LogWarning($"Failed to collect daily skill insight candidates: {ex.Message}");
         }
-
-        return candidates;
     }
 
     private static bool CanGainBookExp(KungfuSkillLvData skill)
