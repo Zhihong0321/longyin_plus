@@ -1,6 +1,6 @@
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { GAME_EXE_NAME, STEAM_APP_ID, VisibleSettings } from './types';
+import { GAME_EXE_NAME, GameHealth, HealthCheckResult, STEAM_APP_ID, VisibleSettings } from './types';
 
 const MAIN_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.staminalock.cfg');
 const HORSE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.horsestamina.cfg');
@@ -10,6 +10,14 @@ const SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltal
 const BATTLE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.battleturbo.cfg');
 const DOORSTOP_NAME = 'doorstop_config.ini';
 const STEAM_APP_ID_NAME = 'steam_appid.txt';
+const REQUIRED_PLUGIN_NAMES = [
+  'LongYinBattleTurbo.dll',
+  'LongYinHorseStaminaMultiplier.dll',
+  'LongYinQuestSnapshot.dll',
+  'LongYinSkillTalentGrant.dll',
+  'LongYinSkipIntro.dll',
+  'LongYinStaminaLock.dll'
+];
 
 interface MainConfigHidden {
   revealExtraFogOnMove: boolean;
@@ -136,6 +144,48 @@ async function writeTextFile(filePath: string, text: string): Promise<void> {
   await fs.writeFile(filePath, normalizeNewlines(text), 'ascii');
 }
 
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
+  }
+  catch {
+    return false;
+  }
+}
+
+async function directoryExists(dirPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(dirPath);
+    return stat.isDirectory();
+  }
+  catch {
+    return false;
+  }
+}
+
+async function canWriteTarget(filePath: string): Promise<boolean> {
+  const writableTarget = (await fileExists(filePath)) ? filePath : path.dirname(filePath);
+
+  try {
+    await fs.access(writableTarget, fsConstants.W_OK);
+    return true;
+  }
+  catch {
+    return false;
+  }
+}
+
+async function sha256File(filePath: string): Promise<string | undefined> {
+  try {
+    const buffer = await fs.readFile(filePath);
+    return (await import('node:crypto')).createHash('sha256').update(buffer).digest('hex');
+  }
+  catch {
+    return undefined;
+  }
+}
+
 export function getGamePaths(gameRoot: string) {
   return {
     gameExePath: path.join(gameRoot, GAME_EXE_NAME),
@@ -148,6 +198,26 @@ export function getGamePaths(gameRoot: string) {
     legacyTraceConfigPath: path.join(gameRoot, LEGACY_TRACE_CONFIG_NAME),
     legacySkillConfigPath: path.join(gameRoot, LEGACY_SKILL_CONFIG_NAME)
   };
+}
+
+function createHealthCheck(key: string, label: string, ok: boolean, detail: string): HealthCheckResult {
+  return { key, label, ok, detail };
+}
+
+function summarizeHealth(checks: HealthCheckResult[], driftedFiles: string[]): string {
+  const failed = checks.filter((check) => !check.ok);
+  if (failed.length === 0 && driftedFiles.length === 0) {
+    return `已通过 ${checks.length} 项安装检查。`;
+  }
+
+  const parts: string[] = [];
+  if (failed.length > 0) {
+    parts.push(`${failed.length} 项环境检查失败`);
+  }
+  if (driftedFiles.length > 0) {
+    parts.push(`${driftedFiles.length} 个载荷文件与当前 Electron 包不一致`);
+  }
+  return `检测到${parts.join('，')}。`;
 }
 
 function readBool(text: string | undefined, key: string, fallback: boolean): boolean {
@@ -562,6 +632,122 @@ function parseVisibleFromBattle(text: string | undefined, settings: VisibleSetti
   };
 }
 
+function diffVisibleSettings(expected: VisibleSettings, actual: VisibleSettings): string[] {
+  const mismatches: string[] = [];
+
+  for (const key of Object.keys(expected) as Array<keyof VisibleSettings>) {
+    if (expected[key] !== actual[key]) {
+      mismatches.push(String(key));
+    }
+  }
+
+  return mismatches;
+}
+
+export async function inspectGameHealth(gameRoot: string, payloadRoot?: string): Promise<GameHealth> {
+  const paths = getGamePaths(gameRoot);
+  const checks: HealthCheckResult[] = [];
+
+  const [gameExeExists, bepinexExists, winhttpExists, steamAppIdExists] = await Promise.all([
+    fileExists(paths.gameExePath),
+    directoryExists(path.join(gameRoot, 'BepInEx')),
+    fileExists(path.join(gameRoot, 'winhttp.dll')),
+    fileExists(paths.steamAppIdPath)
+  ]);
+
+  checks.push(createHealthCheck('game-exe', '游戏主程序', gameExeExists, gameExeExists ? GAME_EXE_NAME : `缺少 ${GAME_EXE_NAME}`));
+  checks.push(createHealthCheck('bepinex-dir', 'BepInEx 目录', bepinexExists, bepinexExists ? '已检测到 BepInEx。' : '缺少 BepInEx 目录。'));
+  checks.push(createHealthCheck('winhttp', 'Doorstop Loader', winhttpExists, winhttpExists ? '已检测到 winhttp.dll。' : '缺少 winhttp.dll。'));
+  checks.push(createHealthCheck('steam-appid', 'Steam AppId', steamAppIdExists, steamAppIdExists ? '已检测到 steam_appid.txt。' : '缺少 steam_appid.txt。'));
+
+  const doorstopText = await readTextIfExists(paths.doorstopConfigPath);
+  const doorstopEnabled = readBool(doorstopText, 'enabled', false);
+  const ignoreDisableSwitch = readBool(doorstopText, 'ignore_disable_switch', false);
+  checks.push(
+    createHealthCheck(
+      'doorstop-config',
+      'Doorstop 配置',
+      doorstopEnabled && ignoreDisableSwitch,
+      doorstopText === undefined
+        ? '缺少 doorstop_config.ini。'
+        : doorstopEnabled && ignoreDisableSwitch
+          ? 'Doorstop 已启用。'
+          : 'doorstop_config.ini 存在，但未启用必要开关。'
+    )
+  );
+
+  const writableMainConfig = await canWriteTarget(paths.mainConfigPath);
+  const writableHorseConfig = await canWriteTarget(paths.horseConfigPath);
+  const writableSkillConfig = await canWriteTarget(paths.skillConfigPath);
+  const writableBattleConfig = await canWriteTarget(paths.battleConfigPath);
+  checks.push(
+    createHealthCheck(
+      'config-writable',
+      '配置文件可写',
+      writableMainConfig && writableHorseConfig && writableSkillConfig && writableBattleConfig,
+      writableMainConfig && writableHorseConfig && writableSkillConfig && writableBattleConfig
+        ? '主要配置文件路径可写。'
+        : '至少有一个主要配置文件无法写入。'
+    )
+  );
+
+  const pluginChecks = await Promise.all(
+    REQUIRED_PLUGIN_NAMES.map(async (pluginName) => {
+      const gamePluginPath = path.join(gameRoot, 'BepInEx', 'plugins', pluginName);
+      const exists = await fileExists(gamePluginPath);
+      return createHealthCheck(
+        `plugin:${pluginName}`,
+        pluginName,
+        exists,
+        exists ? '插件文件存在。' : `缺少插件 ${pluginName}。`
+      );
+    })
+  );
+  checks.push(...pluginChecks);
+
+  const driftedFiles: string[] = [];
+  if (payloadRoot && (await directoryExists(payloadRoot))) {
+    const payloadChecks = await Promise.all(
+      [
+        'winhttp.dll',
+        'doorstop_config.ini',
+        ...REQUIRED_PLUGIN_NAMES.map((pluginName) => path.join('BepInEx', 'plugins', pluginName))
+      ].map(async (relativePath) => {
+        const payloadPath = path.join(payloadRoot, relativePath);
+        const gamePath = path.join(gameRoot, relativePath);
+        const payloadHash = await sha256File(payloadPath);
+        const gameHash = await sha256File(gamePath);
+        const inSync = Boolean(payloadHash) && payloadHash === gameHash;
+        if (!inSync) {
+          driftedFiles.push(relativePath.replace(/\\/g, '/'));
+        }
+
+        return createHealthCheck(
+          `payload:${relativePath}`,
+          `载荷同步 ${relativePath.replace(/\\/g, '/')}`,
+          inSync,
+          inSync ? '与当前 Electron 载荷一致。' : '与当前 Electron 载荷不一致，需重新安装/修复。'
+        );
+      })
+    );
+    checks.push(...payloadChecks);
+  }
+  else if (payloadRoot) {
+    checks.push(createHealthCheck('payload-root', 'Electron 载荷目录', false, `未找到载荷目录：${payloadRoot}`));
+  }
+
+  const healthy = checks.every((check) => check.ok) && driftedFiles.length === 0;
+  const needsRepair = !healthy;
+
+  return {
+    healthy,
+    needsRepair,
+    summary: summarizeHealth(checks, driftedFiles),
+    driftedFiles,
+    checks
+  };
+}
+
 export async function ensureGameFiles(gameRoot: string): Promise<void> {
   const paths = getGamePaths(gameRoot);
   await removeLegacyArtifacts(gameRoot);
@@ -589,7 +775,7 @@ export async function readVisibleSettings(gameRoot: string): Promise<VisibleSett
   return sanitizeVisibleSettings(settings);
 }
 
-export async function saveVisibleSettings(gameRoot: string, settings: VisibleSettings): Promise<void> {
+export async function saveVisibleSettings(gameRoot: string, settings: VisibleSettings): Promise<VisibleSettings> {
   const paths = getGamePaths(gameRoot);
   await ensureGameFiles(gameRoot);
   const normalized = sanitizeVisibleSettings(settings);
@@ -686,6 +872,14 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   nextBattle = upsertIniValue(nextBattle, 'Enabled', boolText(normalized.battleTurboEnabled));
   nextBattle = upsertIniValue(nextBattle, 'ToggleHotkey', normalized.battleTurboHotkey);
   await writeTextFile(paths.battleConfigPath, nextBattle);
+
+  const verified = await readVisibleSettings(gameRoot);
+  const mismatches = diffVisibleSettings(normalized, verified);
+  if (mismatches.length > 0) {
+    throw new Error(`设置写入后校验失败：${mismatches.join(', ')}`);
+  }
+
+  return verified;
 }
 
 export async function ensureSteamAppId(gameRoot: string): Promise<void> {

@@ -151,6 +151,8 @@ export function App() {
 
   const gameRoot = snapshot?.gameRoot ?? '';
   const gameInstalled = snapshot?.gameInstalled ?? false;
+  const health = snapshot?.health ?? { healthy: false, needsRepair: false, summary: '正在加载自检状态。', driftedFiles: [], checks: [] };
+  const failedChecks = health.checks.filter((check) => !check.ok);
   const payloadRoot = snapshot?.payloadRoot ?? '';
   const launchReady = snapshot?.launchReady ?? false;
   const launchBusy = snapshot?.launchState === 'starting' || snapshot?.launchState === 'running';
@@ -272,7 +274,7 @@ export function App() {
       <section className="summary-grid">
         <StatusPill label="应用版本" value={snapshot.appVersion} tone="good" />
         <StatusPill label="游戏目录" value={gameRoot ? '已连接' : '未选择'} tone={gameRoot ? 'good' : 'warn'} />
-        <StatusPill label="模组状态" value={gameInstalled ? '已安装' : '未安装'} tone={gameInstalled ? 'good' : 'warn'} />
+        <StatusPill label="模组状态" value={gameInstalled ? '已就绪' : gameRoot ? '需修复' : '未安装'} tone={gameInstalled ? 'good' : 'warn'} />
         <StatusPill
           label="启动状态"
           value={snapshot.launchState === 'starting' ? '启动中' : snapshot.launchState === 'running' ? '运行中' : '待命'}
@@ -439,6 +441,43 @@ export function App() {
                   <div className="check-list__item">首次启动时，请只点击一次“启动游戏”或“保存并启动”。</div>
                   <div className="check-list__item">如果 BepInEx 正在注入，窗口可能延迟 10 到 20 秒才出现。</div>
                   <div className="check-list__item">当界面显示“启动中”或“运行中”时，启动按钮会自动锁定。</div>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="安装体检" eyebrow="自检">
+              <div className="stack">
+                <p className="body-copy">{health.summary}</p>
+                <div className="check-list">
+                  {health.checks.length > 0 ? (
+                    health.checks
+                      .filter((check) => !check.ok)
+                      .slice(0, 8)
+                      .map((check) => (
+                        <div key={check.key} className="check-list__item">
+                          {check.label}: {check.detail}
+                        </div>
+                      ))
+                  ) : (
+                    <div className="check-list__item">选择游戏目录后，这里会显示真实安装检查结果。</div>
+                  )}
+                  {health.driftedFiles.length > 0 ? (
+                    <div className="check-list__item">
+                      当前游戏目录仍在使用旧载荷：{health.driftedFiles.slice(0, 4).join('，')}
+                      {health.driftedFiles.length > 4 ? ' ...' : ''}
+                    </div>
+                  ) : null}
+                  {health.checks.length > 0 && failedChecks.length === 0 && health.driftedFiles.length === 0 ? (
+                    <div className="check-list__item">核心文件、配置写入权限、以及载荷版本同步均已通过。</div>
+                  ) : null}
+                </div>
+                <div className="inline-actions">
+                  <button className="btn" onClick={install} disabled={working !== null || !gameRoot || launchBusy}>
+                    重新安装并修复
+                  </button>
+                  <button className="btn" onClick={() => void refresh()} disabled={working !== null}>
+                    刷新自检
+                  </button>
                 </div>
               </div>
             </Card>

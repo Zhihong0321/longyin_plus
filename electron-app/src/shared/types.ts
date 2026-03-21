@@ -78,12 +78,28 @@ export interface UpdateCheckResult {
   status?: string;
 }
 
+export interface HealthCheckResult {
+  key: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface GameHealth {
+  healthy: boolean;
+  needsRepair: boolean;
+  summary: string;
+  driftedFiles: string[];
+  checks: HealthCheckResult[];
+}
+
 export interface GameSnapshot {
   appVersion: string;
   payloadRoot: string;
   gameRoot?: string;
   gameRootDetected: boolean;
   gameInstalled: boolean;
+  health: GameHealth;
   gameRunning: boolean;
   launchReady: boolean;
   launchState: 'idle' | 'starting' | 'running';

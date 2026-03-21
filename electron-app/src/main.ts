@@ -8,6 +8,7 @@ import {
   ensureGameFiles,
   ensureSteamAppId,
   getGamePaths,
+  inspectGameHealth,
   readVisibleSettings,
   saveVisibleSettings
 } from './shared/config';
@@ -21,6 +22,7 @@ import {
 import {
   APP_FOLDER_NAME,
   GAME_EXE_NAME,
+  GameHealth,
   GameSnapshot,
   OperationResult,
   ReleaseHistoryItem,
@@ -93,6 +95,16 @@ let cachedUpdate: UpdateCheckResult = {
 };
 let cachedReleaseHistory: ReleaseHistoryItem[] = [];
 let lastLaunchAt = 0;
+
+function createEmptyHealth(summary: string): GameHealth {
+  return {
+    healthy: false,
+    needsRepair: false,
+    summary,
+    driftedFiles: [],
+    checks: []
+  };
+}
 
 async function writeStartupLog(message: string): Promise<void> {
   const line = `[${new Date().toISOString()}] ${message}\n`;
@@ -232,19 +244,30 @@ async function selectGameRoot(): Promise<string | undefined> {
 }
 
 async function isGameInstalled(gameRoot: string): Promise<boolean> {
-  const paths = getGamePaths(gameRoot);
-  try {
-    const [doorstop, configDir, winhttp, exe] = await Promise.all([
-      fs.stat(paths.doorstopConfigPath).then(() => true).catch(() => false),
-      fs.stat(path.join(gameRoot, 'BepInEx')).then((value) => value.isDirectory()).catch(() => false),
-      fs.stat(path.join(gameRoot, 'winhttp.dll')).then(() => true).catch(() => false),
-      fs.stat(paths.gameExePath).then(() => true).catch(() => false)
-    ]);
-    return doorstop && configDir && winhttp && exe;
+  const health = await inspectGameHealth(gameRoot, PAYLOAD_ROOT);
+  return health.healthy;
+}
+
+async function repairGameInstallationIfNeeded(
+  gameRoot: string,
+  actionLabel: string
+): Promise<{ repaired: boolean; health: GameHealth }> {
+  const currentHealth = await inspectGameHealth(gameRoot, PAYLOAD_ROOT);
+  if (!currentHealth.needsRepair) {
+    return { repaired: false, health: currentHealth };
   }
-  catch {
-    return false;
+
+  if (await isGameProcessRunning()) {
+    throw new Error(`检测到模组安装不完整或版本已漂移，且游戏正在运行。请先关闭游戏，再执行“${actionLabel}”。`);
   }
+
+  await installPayload(gameRoot);
+  const repairedHealth = await inspectGameHealth(gameRoot, PAYLOAD_ROOT);
+  if (!repairedHealth.healthy) {
+    throw new Error(`自动修复后仍未通过自检：${repairedHealth.summary}`);
+  }
+
+  return { repaired: true, health: repairedHealth };
 }
 
 async function installPayload(gameRoot: string): Promise<void> {
@@ -305,8 +328,9 @@ async function ensureLaunchPrereqs(gameRoot: string): Promise<void> {
 
 async function launchGame(gameRoot: string): Promise<void> {
   const paths = getGamePaths(gameRoot);
-  if (!(await isGameInstalled(gameRoot))) {
-    throw new Error('请先安装模组载荷，再启动游戏。');
+  const repairResult = await repairGameInstallationIfNeeded(gameRoot, '启动游戏');
+  if (!repairResult.health.healthy) {
+    throw new Error(repairResult.health.summary);
   }
 
   const gameRunning = await isGameProcessRunning();
@@ -337,13 +361,17 @@ async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
 
   let visibleSettings = { ...DEFAULT_VISIBLE_SETTINGS };
   let gameInstalled = false;
+  let health = createEmptyHealth(gameRoot ? '尚未检查安装状态。' : '未选择游戏目录。');
   const gameRunning = await isGameProcessRunning();
   const launchState = getLaunchState(gameRunning);
 
   if (gameRoot) {
     visibleSettings = await readVisibleSettings(gameRoot);
-    gameInstalled = await isGameInstalled(gameRoot);
+    health = await inspectGameHealth(gameRoot, PAYLOAD_ROOT);
+    gameInstalled = health.healthy;
   }
+
+  const effectiveStatus = status === '准备就绪' && gameRoot && !health.healthy ? health.summary : status;
 
   return {
     appVersion: app.getVersion(),
@@ -351,12 +379,13 @@ async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
     gameRoot,
     gameRootDetected: Boolean(gameRoot),
     gameInstalled,
+    health,
     gameRunning,
     launchReady: Boolean(gameRoot) && gameInstalled && launchState.launchReady,
     launchState: launchState.launchState,
     launchNote: launchState.launchNote,
     visibleSettings,
-    status,
+    status: effectiveStatus,
     update: cachedUpdate
   };
 }
@@ -367,8 +396,9 @@ async function saveSettingsAndRefresh(settings: VisibleSettings): Promise<GameSn
     throw new Error('请先选择游戏目录。');
   }
 
+  const repairResult = await repairGameInstallationIfNeeded(gameRoot, '保存设置');
   await saveVisibleSettings(gameRoot, settings);
-  return buildSnapshot('设置已保存。');
+  return buildSnapshot(repairResult.repaired ? '已自动修复载荷漂移，并保存设置。' : '设置已保存。');
 }
 
 async function checkUpdates(): Promise<UpdateCheckResult> {
@@ -442,9 +472,9 @@ function registerIpc(): void {
         await installPayload(gameRoot);
         return {
           ok: true,
-          message: '模组载荷已安装。',
+          message: '模组载荷已安装，并已完成自检。',
       gameRoot,
-      updatedSnapshot: await buildSnapshot('已安装。')
+      updatedSnapshot: await buildSnapshot('已安装并完成自检。')
     } satisfies OperationResult;
   });
   ipcMain.handle('app:uninstall', async () => {
