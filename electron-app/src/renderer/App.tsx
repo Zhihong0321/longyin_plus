@@ -764,18 +764,6 @@ export function App() {
                   step={1}
                   hint="影响交谈、请教等每月互动次数。"
                 />
-                <CheckboxField
-                  label="启动时开启对话快进"
-                  value={settings.dialogFastForwardEnabled}
-                  onChange={(value) => updateSetting('dialogFastForwardEnabled', value)}
-                  hint="进入纯文本对话时会自动尝试快进，遇到选择时会自动停下。"
-                />
-                <TextField
-                  label="对话快进快捷键"
-                  value={settings.dialogFastForwardHotkey}
-                  onChange={(value) => updateSetting('dialogFastForwardHotkey', clampText(value))}
-                  hint="填写 Unity KeyCode 名称，例如 P、F9、Mouse3。"
-                />
                 <NumberField
                   label="辩论我方伤害倍率"
                   value={settings.debatePlayerDamageTakenMultiplier}

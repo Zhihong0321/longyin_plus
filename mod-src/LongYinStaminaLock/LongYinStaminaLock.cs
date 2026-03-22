@@ -26,7 +26,6 @@ private const string TeachSkillSideTabSoundName = "Woosh";
 private const float TeachSkillSideTabSoundVolume = 1f;
     private const float DrinkFillMatchTolerance = 0.02f;
     private const float DrinkFillDeltaTolerance = 0.005f;
-    private const float DialogFastForwardPulseIntervalSecondsDefault = 0.5f;
     private static readonly string[] RelationshipBonusMessages =
     {
         "你今天比较帅，好感有多加 {0}",
@@ -69,11 +68,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<int> _teachSkillSameSectAreaShareMinPercent = null!;
     private static ConfigEntry<int> _teachSkillSameSectAreaShareMaxPercent = null!;
     private static ConfigEntry<float> _dialogMonthlyLimitMultiplier = null!;
-    private static ConfigEntry<bool> _forceAutoContinueEnabled = null!;
-    private static ConfigEntry<KeyCode> _forceAutoContinueHotkey = null!;
-    private static ConfigEntry<float> _forceAutoContinuePulseIntervalSeconds = null!;
-    private static ConfigEntry<bool> _fastForwardSafetyEnabled = null!;
-    private static ConfigEntry<int> _fastForwardStuckFrames = null!;
     private static ConfigEntry<bool> _traceMode = null!;
     private static ConfigEntry<bool> _traceTreasureChestEvents = null!;
     private static ConfigEntry<bool> _freezeDate = null!;
@@ -100,11 +94,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static readonly Dictionary<string, int> _dialogMonthlyUseCounts = new(StringComparer.Ordinal);
     private static HeroData? _activeDialogHero;
     private static int _activeDialogHeroId = -1;
-    private static bool _forceAutoContinueActive;
-    private static int _lastDialogProgressFrame = -1;
-    private static string _lastDialogObservedSignature = string.Empty;
-    private static string _lastDialogStuckSignature = string.Empty;
-    private static float _nextDialogFastForwardPulseAt = -1f;
     private static readonly List<KungfuSkillLvData> _dailySkillInsightCandidateBuffer = new();
     private Harmony? _harmony;
 
@@ -201,18 +190,11 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _teachSkillSameSectAreaShareMinPercent = Config.Bind("Teaching", "SameSectAreaShareMinPercent", 80, "Minimum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
         _teachSkillSameSectAreaShareMaxPercent = Config.Bind("Teaching", "SameSectAreaShareMaxPercent", 120, "Maximum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
         _dialogMonthlyLimitMultiplier = Config.Bind("DialogFlow", "MonthlyLimitMultiplier", 3f, "Scales the monthly per-NPC interaction quota used by talk, teach, and similar meet choices.");
-        _forceAutoContinueEnabled = Config.Bind("DialogFlow", "ForceAutoContinueEnabled", true, "When enabled, the dialog fast-forward toggle is available and starts active.");
-        _forceAutoContinueHotkey = Config.Bind("DialogFlow", "ForceAutoContinueHotkey", KeyCode.P, "Hotkey used to toggle forced dialog fast-forward.");
-        _forceAutoContinuePulseIntervalSeconds = Config.Bind("DialogFlow", "ForceAutoContinuePulseIntervalSeconds", DialogFastForwardPulseIntervalSecondsDefault, "How often forced dialog fast-forward sends an extra advance pulse while dialog text is open. Set to 0 to disable the pulse.");
-        _fastForwardSafetyEnabled = Config.Bind("DialogFlow", "FastForwardSafetyEnabled", true, "Automatically disables forced fast-forward if a dialog appears stuck for too long.");
-        _fastForwardStuckFrames = Config.Bind("DialogFlow", "FastForwardStuckFrames", 180, "How many unchanged frames are allowed before the fast-forward safety turns itself off.");
         _traceMode = Config.Bind("Debug", "TracerEnabled", false, "Master switch for all mod tracer logs. When false, trace helpers stay silent.");
         _traceTreasureChestEvents = Config.Bind("Debug", "TraceTreasureChestEvents", false, "When TracerEnabled is true, logs treasure chest interception, choice UI, and reward resolution.");
         _freezeDate = Config.Bind("Time", "FreezeDate", false, "Blocks in-game day, month, and year progression.");
         _freezeDateHotkey = Config.Bind("Time", "ToggleFreezeDateHotkey", KeyCode.F10, "Hotkey that toggles date freezing while in game.");
         _outsideBattleSpeedHotkey = Config.Bind("Time", "CycleOutsideBattleSpeedHotkey", KeyCode.F11, "Hotkey that cycles the test speed multiplier outside battle.");
-        _forceAutoContinueActive = _forceAutoContinueEnabled.Value;
-
         _harmony = new Harmony("codex.longyin.staminalock");
         PatchMethod(typeof(ExploreController), "ChangeMoveStep", new[] { typeof(int) }, nameof(ChangeMoveStepPrefix), null);
         PatchMethod(typeof(ExploreController), "ChangeMoveStep", new[] { typeof(int), typeof(bool) }, nameof(ChangeMoveStepWithBoolPrefix), null);
@@ -228,7 +210,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(PlotController), nameof(PlotController.AutoPlotButtonClicked), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.ShowHeroInteractUI), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageMeetNpcPlot), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
-        PatchMethod(typeof(PlotController), nameof(PlotController.Update), Type.EmptyTypes, nameof(DialogControllerUpdatePrefix), nameof(DialogControllerUpdatePostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.Update), Type.EmptyTypes, null, nameof(DialogChoiceRowPostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.OnClick), Type.EmptyTypes, nameof(DialogChoiceClickPrefix), null);
         PatchMethod(typeof(BuildChoiceButtonController), nameof(BuildChoiceButtonController.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
@@ -298,9 +279,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             $"Same-sect teaching splash starts {(_teachSkillSameSectAreaShareEnabled.Value ? "ON" : "OFF")} " +
             $"at {ClampTeachSkillSplashPercent(_teachSkillSameSectAreaShareMinPercent.Value)}%-{ClampTeachSkillSplashPercent(_teachSkillSameSectAreaShareMaxPercent.Value)}%.");
         Log.LogInfo($"Dialog monthly limit multiplier starts at x{FormatConfigFloat(_dialogMonthlyLimitMultiplier.Value)}.");
-        Log.LogInfo(
-            $"Dialog fast-forward starts {(_forceAutoContinueActive ? "ON" : "OFF")} with hotkey {_forceAutoContinueHotkey.Value} " +
-            $"and safety {(_fastForwardSafetyEnabled.Value ? "ON" : "OFF")} at a {Math.Max(0f, _forceAutoContinuePulseIntervalSeconds.Value):0.###}s pulse.");
         Log.LogInfo($"Tracer master starts {(_traceMode.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure chest tracer starts {(_traceTreasureChestEvents.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Date freeze starts {(_freezeDate.Value ? "ON" : "OFF")} with hotkey {_freezeDateHotkey.Value}.");
@@ -1599,52 +1577,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         CacheActiveDialogHero(__0);
     }
 
-    private static void DialogControllerUpdatePrefix(PlotController __instance)
-    {
-        if (__instance == null)
-        {
-            return;
-        }
-
-        if (CheckForcedAutoContinueHotkey())
-        {
-            _forceAutoContinueActive = !_forceAutoContinueActive;
-            if (!_forceAutoContinueActive)
-            {
-                ResetForcedAutoContinueRuntime();
-                __instance.SetAutoPlot(false);
-                __instance.SetSkipPlot(false);
-                __instance.plotAutoing = false;
-                __instance.plotSkipping = false;
-            }
-            else
-            {
-                ResetForcedAutoContinueRuntime();
-            }
-
-            PushPlayerLog($"Mod: Dialog Fast Forward {(_forceAutoContinueActive ? "ON" : "OFF")}");
-        }
-
-        ApplyForcedAutoContinueIfNeeded(__instance);
-    }
-
-    private static void DialogControllerUpdatePostfix(PlotController __instance)
-    {
-        if (__instance == null)
-        {
-            return;
-        }
-
-        var signature = BuildDialogProgressSignature(__instance);
-        if (!string.Equals(_lastDialogObservedSignature, signature, StringComparison.Ordinal))
-        {
-            _lastDialogObservedSignature = signature;
-            MarkDialogProgress();
-        }
-
-        CheckForFastForwardStuck(__instance);
-    }
-
     private static void DialogChoiceRowPostfix(PlotInteractController __instance)
     {
         if (__instance?.choiceData == null)
@@ -1663,234 +1595,12 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         ApplyDialogMonthlyQuota(__instance, __instance.choiceData, consume: true);
-        MarkDialogProgress();
     }
 
     private static void CacheActiveDialogHero(HeroData? hero)
     {
         _activeDialogHero = hero;
         _activeDialogHeroId = TryGetHeroId(hero) ?? -1;
-    }
-
-    private static bool CheckForcedAutoContinueHotkey()
-    {
-        try
-        {
-            return Input.GetKeyDown(_forceAutoContinueHotkey.Value);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static void ApplyForcedAutoContinueIfNeeded(PlotController? controller)
-    {
-        if (controller == null || !_forceAutoContinueEnabled.Value || !_forceAutoContinueActive)
-        {
-            ResetForcedAutoContinueRuntime();
-            return;
-        }
-
-        if (HasBlockingDialogChoice(controller))
-        {
-            if (controller.plotAutoing)
-            {
-                controller.SetAutoPlot(false);
-                controller.plotAutoing = false;
-            }
-
-            if (controller.plotSkipping)
-            {
-                controller.SetSkipPlot(false);
-                controller.plotSkipping = false;
-            }
-
-            _nextDialogFastForwardPulseAt = -1f;
-            return;
-        }
-
-        if (!IsDialogOpen(controller))
-        {
-            ResetForcedAutoContinueRuntime();
-            return;
-        }
-
-        EnsureForcedAutoContinueState(controller);
-        TryPulseForcedAutoContinue(controller);
-    }
-
-    private static bool HasBlockingDialogChoice(PlotController controller)
-    {
-        if (controller.plotChoiceShowing)
-        {
-            return true;
-        }
-
-        if (controller.plotTextShowing)
-        {
-            return false;
-        }
-
-        return !string.IsNullOrWhiteSpace(TryGetChoiceParam(controller.newChoice))
-            || !string.IsNullOrWhiteSpace(TryGetChoiceParam(controller.nowChoice));
-    }
-
-    private static void EnsureForcedAutoContinueState(PlotController controller)
-    {
-        if (!controller.plotAutoing)
-        {
-            controller.SetAutoPlot(true);
-            controller.plotAutoing = true;
-        }
-
-        controller.SetSkipPlot(true);
-        if (!controller.plotSkipping)
-        {
-            controller.plotSkipping = true;
-        }
-    }
-
-    private static void TryPulseForcedAutoContinue(PlotController controller)
-    {
-        if (!controller.plotTextShowing)
-        {
-            _nextDialogFastForwardPulseAt = -1f;
-            return;
-        }
-
-        var pulseIntervalSeconds = Math.Max(0f, _forceAutoContinuePulseIntervalSeconds.Value);
-        if (pulseIntervalSeconds <= 0f)
-        {
-            return;
-        }
-
-        var now = Time.realtimeSinceStartup;
-        if (_nextDialogFastForwardPulseAt < 0f)
-        {
-            _nextDialogFastForwardPulseAt = now + pulseIntervalSeconds;
-            return;
-        }
-
-        if (now < _nextDialogFastForwardPulseAt)
-        {
-            return;
-        }
-
-        _nextDialogFastForwardPulseAt = now + pulseIntervalSeconds;
-        var beforeSignature = BuildDialogProgressSignature(controller);
-        if (TryAdvanceDialogWithPulse(controller, beforeSignature))
-        {
-            MarkDialogProgress();
-        }
-    }
-
-    private static bool TryAdvanceDialogWithPulse(PlotController controller, string beforeSignature)
-    {
-        return TryRunDialogPulseStep(controller, beforeSignature, nameof(PlotController.PlotBackgroundClicked), static target => target.PlotBackgroundClicked())
-            || TryRunDialogPulseStep(controller, beforeSignature, nameof(PlotController.ChangeNextPlot), static target => target.ChangeNextPlot())
-            || TryRunDialogPulseStep(controller, beforeSignature, nameof(PlotController.GoNextPlot), static target => target.GoNextPlot())
-            || TryRunDialogPulseStep(controller, beforeSignature, nameof(PlotController.AutoPlotButtonClicked), static target => target.AutoPlotButtonClicked());
-    }
-
-    private static bool TryRunDialogPulseStep(PlotController controller, string beforeSignature, string stepName, Action<PlotController> action)
-    {
-        try
-        {
-            action(controller);
-        }
-        catch (Exception ex)
-        {
-            LoggerInstance.LogWarning($"Dialog fast-forward pulse step {stepName} failed: {ex.Message}");
-            return false;
-        }
-
-        var afterSignature = BuildDialogProgressSignature(controller);
-        var advanced = !string.Equals(beforeSignature, afterSignature, StringComparison.Ordinal);
-        if (advanced && _traceMode.Value)
-        {
-            LoggerInstance.LogInfo($"Dialog fast-forward pulse advanced via {stepName}: {afterSignature}");
-        }
-
-        return advanced;
-    }
-
-    private static string BuildDialogProgressSignature(PlotController controller)
-    {
-        var newChoiceParam = TryGetChoiceParam(controller.newChoice) ?? string.Empty;
-        var currentChoiceParam = TryGetChoiceParam(controller.nowChoice) ?? string.Empty;
-        var plotId = SafeFormatValue(
-            SafeGetMemberValue(controller, "nowPlotID")
-            ?? SafeGetMemberValue(controller, "plotID")
-            ?? SafeGetMemberValue(controller, "nowPlotIndex"));
-
-        return $"plot={plotId}; happen={controller.plotHappen}; text={controller.plotTextShowing}; choice={controller.plotChoiceShowing}; auto={controller.plotAutoing}; skip={controller.plotSkipping}; new={newChoiceParam}; now={currentChoiceParam}";
-    }
-
-    private static void MarkDialogProgress()
-    {
-        _lastDialogProgressFrame = Time.frameCount;
-        _lastDialogStuckSignature = string.Empty;
-    }
-
-    private static void CheckForFastForwardStuck(PlotController controller)
-    {
-        if (!_forceAutoContinueEnabled.Value || !_forceAutoContinueActive)
-        {
-            return;
-        }
-
-        if (!IsDialogOpen(controller))
-        {
-            ResetForcedAutoContinueRuntime();
-            return;
-        }
-
-        if (_lastDialogProgressFrame < 0)
-        {
-            _lastDialogProgressFrame = Time.frameCount;
-            _lastDialogObservedSignature = BuildDialogProgressSignature(controller);
-            return;
-        }
-
-        var framesSinceProgress = Time.frameCount - _lastDialogProgressFrame;
-        if (framesSinceProgress < _fastForwardStuckFrames.Value)
-        {
-            return;
-        }
-
-        var stuckSignature = BuildDialogProgressSignature(controller);
-        if (string.Equals(_lastDialogStuckSignature, stuckSignature, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _lastDialogStuckSignature = stuckSignature;
-        if (!_fastForwardSafetyEnabled.Value)
-        {
-            return;
-        }
-
-        _forceAutoContinueActive = false;
-        ResetForcedAutoContinueRuntime();
-        controller.SetAutoPlot(false);
-        controller.SetSkipPlot(false);
-        controller.plotAutoing = false;
-        controller.plotSkipping = false;
-        PushPlayerLog("Mod: Dialog Fast Forward OFF (safety)");
-    }
-
-    private static bool IsDialogOpen(PlotController controller)
-    {
-        return controller.plotHappen || controller.plotChoiceShowing || controller.plotTextShowing;
-    }
-
-    private static void ResetForcedAutoContinueRuntime()
-    {
-        _lastDialogProgressFrame = -1;
-        _lastDialogObservedSignature = string.Empty;
-        _lastDialogStuckSignature = string.Empty;
-        _nextDialogFastForwardPulseAt = -1f;
     }
 
     private static void ApplyDialogMonthlyQuota(PlotInteractController controller, SinglePlotChoiceData choice, bool consume)

@@ -62,8 +62,6 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   drinkPlayerPowerCostMultiplier: 1,
   drinkEnemyPowerCostMultiplier: 1,
   dialogMonthlyLimitMultiplier: 3,
-  dialogFastForwardEnabled: true,
-  dialogFastForwardHotkey: 'P',
   dailySkillInsightChancePercent: 0,
   dailySkillInsightExpPercent: 5,
   dailySkillInsightUseRarityScaling: true,
@@ -295,6 +293,18 @@ function upsertIniSectionValue(text: string, section: string, key: string, value
   });
 }
 
+function removeIniSectionValue(text: string, section: string, key: string): string {
+  const sectionPattern = new RegExp(
+    `(^\\s*\\[${escapeRegex(section)}\\]\\s*$\\r?\\n?)([\\s\\S]*?)(?=^\\s*\\[[^\\]]+\\]\\s*$|\\Z)`,
+    'mi'
+  );
+
+  return text.replace(sectionPattern, (_match, header: string, body: string) => {
+    const nextBody = body.replace(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*.*(?:\\r?\\n)?`, 'gmi'), '');
+    return `${header}${nextBody}`;
+  });
+}
+
 function getIniSectionBody(text: string | undefined, section: string): string | undefined {
   if (!text) {
     return undefined;
@@ -360,10 +370,6 @@ EnemyPowerCostMultiplier = ${formatFloat(settings.drinkEnemyPowerCostMultiplier)
 
 [DialogFlow]
 MonthlyLimitMultiplier = ${formatFloat(settings.dialogMonthlyLimitMultiplier)}
-ForceAutoContinueEnabled = ${boolText(settings.dialogFastForwardEnabled)}
-ForceAutoContinueHotkey = ${settings.dialogFastForwardHotkey}
-FastForwardSafetyEnabled = true
-FastForwardStuckFrames = 180
 
 [DailySkillInsight]
 HitChancePercent = ${settings.dailySkillInsightChancePercent}
@@ -507,8 +513,6 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     drinkPlayerPowerCostMultiplier: clamp(input.drinkPlayerPowerCostMultiplier, 0, 999),
     drinkEnemyPowerCostMultiplier: clamp(input.drinkEnemyPowerCostMultiplier, 0, 999),
     dialogMonthlyLimitMultiplier: clamp(input.dialogMonthlyLimitMultiplier, 0, 999),
-    dialogFastForwardEnabled: input.dialogFastForwardEnabled,
-    dialogFastForwardHotkey: normalizeHotkey(input.dialogFastForwardHotkey, DEFAULT_VISIBLE_SETTINGS.dialogFastForwardHotkey),
     dailySkillInsightChancePercent: Math.round(clamp(input.dailySkillInsightChancePercent, 0, 100)),
     dailySkillInsightExpPercent: clamp(input.dailySkillInsightExpPercent, 0, 999),
     dailySkillInsightUseRarityScaling: input.dailySkillInsightUseRarityScaling,
@@ -577,16 +581,6 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       dialogFlowSection,
       'MonthlyLimitMultiplier',
       DEFAULT_VISIBLE_SETTINGS.dialogMonthlyLimitMultiplier
-    ),
-    dialogFastForwardEnabled: readBool(
-      dialogFlowSection,
-      'ForceAutoContinueEnabled',
-      DEFAULT_VISIBLE_SETTINGS.dialogFastForwardEnabled
-    ),
-    dialogFastForwardHotkey: readString(
-      dialogFlowSection,
-      'ForceAutoContinueHotkey',
-      DEFAULT_VISIBLE_SETTINGS.dialogFastForwardHotkey
     ),
     dailySkillInsightChancePercent: readInt(
       dailySkillInsightSection,
@@ -851,20 +845,11 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'MonthlyLimitMultiplier',
     formatFloat(normalized.dialogMonthlyLimitMultiplier)
   );
-  nextMain = upsertIniSectionValue(
-    nextMain,
-    'DialogFlow',
-    'ForceAutoContinueEnabled',
-    boolText(normalized.dialogFastForwardEnabled)
-  );
-  nextMain = upsertIniSectionValue(
-    nextMain,
-    'DialogFlow',
-    'ForceAutoContinueHotkey',
-    normalized.dialogFastForwardHotkey
-  );
-  nextMain = upsertIniSectionValue(nextMain, 'DialogFlow', 'FastForwardSafetyEnabled', 'true');
-  nextMain = upsertIniSectionValue(nextMain, 'DialogFlow', 'FastForwardStuckFrames', '180');
+  nextMain = removeIniSectionValue(nextMain, 'DialogFlow', 'ForceAutoContinueEnabled');
+  nextMain = removeIniSectionValue(nextMain, 'DialogFlow', 'ForceAutoContinueHotkey');
+  nextMain = removeIniSectionValue(nextMain, 'DialogFlow', 'ForceAutoContinuePulseIntervalSeconds');
+  nextMain = removeIniSectionValue(nextMain, 'DialogFlow', 'FastForwardSafetyEnabled');
+  nextMain = removeIniSectionValue(nextMain, 'DialogFlow', 'FastForwardStuckFrames');
   nextMain = upsertIniValue(nextMain, 'HitChancePercent', String(normalized.dailySkillInsightChancePercent));
   nextMain = upsertIniValue(nextMain, 'ExpPercent', formatFloat(normalized.dailySkillInsightExpPercent, 1));
   nextMain = upsertIniValue(nextMain, 'UseRarityScaling', boolText(normalized.dailySkillInsightUseRarityScaling));

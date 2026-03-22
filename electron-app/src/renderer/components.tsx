@@ -52,8 +52,6 @@ export function defaultSettings(): VisibleSettings {
     drinkPlayerPowerCostMultiplier: 1,
     drinkEnemyPowerCostMultiplier: 1,
     dialogMonthlyLimitMultiplier: 3,
-    dialogFastForwardEnabled: true,
-    dialogFastForwardHotkey: 'P',
     dailySkillInsightChancePercent: 0,
     dailySkillInsightExpPercent: 5,
     dailySkillInsightUseRarityScaling: true,

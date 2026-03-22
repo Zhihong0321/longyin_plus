@@ -24,8 +24,6 @@ export interface VisibleSettings {
   drinkPlayerPowerCostMultiplier: number;
   drinkEnemyPowerCostMultiplier: number;
   dialogMonthlyLimitMultiplier: number;
-  dialogFastForwardEnabled: boolean;
-  dialogFastForwardHotkey: string;
   dailySkillInsightChancePercent: number;
   dailySkillInsightExpPercent: number;
   dailySkillInsightUseRarityScaling: boolean;

@@ -43,6 +43,9 @@ const USER_DATA_ROOT = process.env.LONGYIN_USER_DATA_ROOT ?? path.join(APP_ROOT,
 const SETTINGS_PATH = path.join(USER_DATA_ROOT, 'settings.json');
 const STARTUP_LOG_PATH = path.join(USER_DATA_ROOT, 'startup.log');
 const OTA_LOG_PATH = path.join(USER_DATA_ROOT, 'ota-update.log');
+const OTA_HELPER_SCRIPT_PATH = IS_PACKAGED
+  ? path.join(process.resourcesPath, 'updater', 'apply-ota-update.ps1')
+  : path.resolve(APP_CONTENT_ROOT, 'scripts', 'apply-ota-update.ps1');
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
@@ -65,8 +68,6 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   drinkPlayerPowerCostMultiplier: 1,
   drinkEnemyPowerCostMultiplier: 1,
   dialogMonthlyLimitMultiplier: 3,
-  dialogFastForwardEnabled: true,
-  dialogFastForwardHotkey: 'P',
   dailySkillInsightChancePercent: 0,
   dailySkillInsightExpPercent: 5,
   dailySkillInsightUseRarityScaling: true,
@@ -436,7 +437,14 @@ async function applyUpdate(): Promise<OperationResult> {
   await writeStartupLog(`开始应用 OTA 更新：${update.currentVersion} -> ${update.latestVersion}`);
   const { stageRoot } = await stageGitHubUpdate(update.manifest);
   await writeStartupLog(`OTA 暂存目录：${stageRoot}`);
-  await launchUpdateHelper(process.pid, stageRoot, APP_ROOT, path.basename(process.execPath), OTA_LOG_PATH);
+  await launchUpdateHelper(
+    OTA_HELPER_SCRIPT_PATH,
+    process.pid,
+    stageRoot,
+    APP_ROOT,
+    path.basename(process.execPath),
+    OTA_LOG_PATH
+  );
   void setTimeout(() => app.quit(), 250);
 
   return {
