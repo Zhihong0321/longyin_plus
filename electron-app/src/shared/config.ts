@@ -275,12 +275,16 @@ function ensureIniSection(text: string, section: string): string {
   return `${text}${suffix}[${section}]\r\n`;
 }
 
-function upsertIniSectionValue(text: string, section: string, key: string, value: string): string {
-  const ensured = ensureIniSection(text, section);
-  const sectionPattern = new RegExp(
-    `(^\\s*\\[${escapeRegex(section)}\\]\\s*$\\r?\\n?)([\\s\\S]*?)(?=^\\s*\\[[^\\]]+\\]\\s*$|\\Z)`,
+function createIniSectionPattern(section: string): RegExp {
+  return new RegExp(
+    `(^\\s*\\[${escapeRegex(section)}\\]\\s*$\\r?\\n?)([\\s\\S]*?)(?=^\\s*\\[[^\\]]+\\]\\s*$|(?![\\s\\S]))`,
     'mi'
   );
+}
+
+function upsertIniSectionValue(text: string, section: string, key: string, value: string): string {
+  const ensured = ensureIniSection(text, section);
+  const sectionPattern = createIniSectionPattern(section);
 
   return ensured.replace(sectionPattern, (_match, header: string, body: string) => {
     const keyPattern = new RegExp(`^(\\s*${escapeRegex(key)}\\s*=\\s*).*$`, 'mi');
@@ -294,10 +298,7 @@ function upsertIniSectionValue(text: string, section: string, key: string, value
 }
 
 function removeIniSectionValue(text: string, section: string, key: string): string {
-  const sectionPattern = new RegExp(
-    `(^\\s*\\[${escapeRegex(section)}\\]\\s*$\\r?\\n?)([\\s\\S]*?)(?=^\\s*\\[[^\\]]+\\]\\s*$|\\Z)`,
-    'mi'
-  );
+  const sectionPattern = createIniSectionPattern(section);
 
   return text.replace(sectionPattern, (_match, header: string, body: string) => {
     const nextBody = body.replace(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*.*(?:\\r?\\n)?`, 'gmi'), '');
@@ -535,7 +536,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
 function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const dialogFlowSection = getIniSectionBody(text, 'DialogFlow');
   const dailySkillInsightSection = getIniSectionBody(text, 'DailySkillInsight');
-  const timeSection = getIniSectionBody(text, 'Time');
+  const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
 
   return {
     lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
@@ -606,10 +607,10 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
     skillTalentLevelThreshold: DEFAULT_VISIBLE_SETTINGS.skillTalentLevelThreshold,
     skillTalentTierPointMultiplier: DEFAULT_VISIBLE_SETTINGS.skillTalentTierPointMultiplier,
     skillTalentPlayerOnly: DEFAULT_VISIBLE_SETTINGS.skillTalentPlayerOnly,
-    freezeDate: readBool(timeSection, 'FreezeDate', DEFAULT_VISIBLE_SETTINGS.freezeDate),
-    freezeHotkey: readString(timeSection, 'ToggleFreezeDateHotkey', DEFAULT_VISIBLE_SETTINGS.freezeHotkey),
+    freezeDate: readBool(systemsSection, 'FreezeDate', DEFAULT_VISIBLE_SETTINGS.freezeDate),
+    freezeHotkey: readString(systemsSection, 'ToggleFreezeDateHotkey', DEFAULT_VISIBLE_SETTINGS.freezeHotkey),
     outsideBattleSpeedHotkey: readString(
-      timeSection,
+      systemsSection,
       'CycleOutsideBattleSpeedHotkey',
       DEFAULT_VISIBLE_SETTINGS.outsideBattleSpeedHotkey
     ),
