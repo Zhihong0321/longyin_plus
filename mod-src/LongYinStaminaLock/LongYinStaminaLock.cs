@@ -9,7 +9,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.12")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.13")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -55,6 +55,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<int> _merchantCarryCash = null!;
     private static ConfigEntry<int> _luckyMoneyHitChancePercent = null!;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
+    private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
+    private static ConfigEntry<float> _teamAutoFavorPerDay = null!;
     private static ConfigEntry<float> _debatePlayerDamageTakenMultiplier = null!;
     private static ConfigEntry<float> _debateEnemyDamageTakenMultiplier = null!;
     private static ConfigEntry<bool> _craftRandomPickUpgradeEnabled = null!;
@@ -82,6 +84,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static readonly System.Random Random = new();
     private static bool _applyingLuckyMoneyRefund;
     private static bool _applyingDailySkillInsightExp;
+    private static bool _applyingTeamAutoFavor;
     private static bool _exploreFullRevealConsumed;
     private static bool _grantingTreasureChestChoiceReward;
     private static bool _grantingTreasureChestBonusItems;
@@ -180,6 +183,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
+        _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
+        _teamAutoFavorPerDay = Config.Bind("Relationship", "TeamAutoFavorPerDay", 5f, "Favor granted to each current player teammate per elapsed in-game day.");
         _debatePlayerDamageTakenMultiplier = Config.Bind("Debate", "PlayerDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the player side when a round is lost.");
         _debateEnemyDamageTakenMultiplier = Config.Bind("Debate", "EnemyDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the enemy side when a round is won.");
         _craftRandomPickUpgradeEnabled = Config.Bind("Craft", "RandomPickUpgrade", true, "Uses the picked craft result as the base item, then regenerates it toward the next major tier.");
@@ -271,6 +276,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Merchant cash floor starts at {Math.Max(0, _merchantCarryCash.Value)}.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
+        Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
         Log.LogInfo($"Debate player damage taken multiplier starts at x{FormatConfigFloat(_debatePlayerDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Debate enemy damage taken multiplier starts at x{FormatConfigFloat(_debateEnemyDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Craft picked-result major-tier upgrade starts {(_craftRandomPickUpgradeEnabled.Value ? "ON" : "OFF")}.");
@@ -1274,7 +1280,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
     private static void ChangeFavorPrefix(HeroData __instance, ref float num)
     {
-        if (num <= 0f || IsPlayerHero(__instance))
+        if (_applyingTeamAutoFavor || num <= 0f || IsPlayerHero(__instance))
         {
             return;
         }
@@ -1537,6 +1543,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         HandleDailySkillInsightDateProgress(__state.BeforeDate, TryGetWorldDateSnapshot(), DescribeMethod(__originalMethod));
+        HandleTeamAutoFavorDateProgress(__state.BeforeDate, TryGetWorldDateSnapshot(), DescribeMethod(__originalMethod));
     }
 
     private static bool HourChangePrefix(MethodBase __originalMethod, object[] __args, out string __state)
@@ -3044,6 +3051,33 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return nameValue?.ToString() ?? "unknown";
     }
 
+    private static float? TryReadFavor(HeroData? hero)
+    {
+        if (hero == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return hero.favor;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            return hero.Favor(false);
+        }
+        catch
+        {
+        }
+
+        var value = SafeProperty(hero, "favor") ?? SafeField(hero, "favor") ?? SafeProperty(hero, "Favor");
+        return TryConvertToFloat(value);
+    }
+
     private static int? TryGetHeroId(HeroData? hero)
     {
         if (hero == null)
@@ -3053,6 +3087,60 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         var value = SafeProperty(hero, "heroID") ?? SafeField(hero, "heroID") ?? SafeProperty(hero, "HeroID") ?? SafeField(hero, "HeroID");
         return TryConvertToInt(value);
+    }
+
+    private static bool TryIsHeroInTeam(HeroData? hero)
+    {
+        if (hero == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return hero.inTeam;
+        }
+        catch
+        {
+            var value = SafeProperty(hero, "inTeam") ?? SafeField(hero, "inTeam");
+            return TryConvertToBool(value) ?? false;
+        }
+    }
+
+    private static bool TryIsHeroRecruitedByPlayer(HeroData? hero)
+    {
+        if (hero == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return hero.recruitByPlayer;
+        }
+        catch
+        {
+            var value = SafeProperty(hero, "recruitByPlayer") ?? SafeField(hero, "recruitByPlayer");
+            return TryConvertToBool(value) ?? false;
+        }
+    }
+
+    private static int? TryGetHeroTeamLeaderId(HeroData? hero)
+    {
+        if (hero == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return hero.teamLeader;
+        }
+        catch
+        {
+            var value = SafeProperty(hero, "teamLeader") ?? SafeField(hero, "teamLeader");
+            return TryConvertToInt(value);
+        }
     }
 
     private static int? TryGetHeroAreaId(HeroData? hero)
@@ -3437,6 +3525,212 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         {
             TryRollDailySkillInsight(i + 1, elapsedDays, source);
         }
+    }
+
+    private static void HandleTeamAutoFavorDateProgress(TimeData? beforeDate, TimeData? afterDate, string source)
+    {
+        if (!_teamAutoFavorEnabled.Value || beforeDate == null || afterDate == null)
+        {
+            return;
+        }
+
+        var elapsedDays = GetElapsedDayCount(beforeDate, afterDate);
+        if (elapsedDays <= 0)
+        {
+            return;
+        }
+
+        TryApplyTeamAutoFavor(elapsedDays, source);
+    }
+
+    private static void TryApplyTeamAutoFavor(int elapsedDays, string source)
+    {
+        var perDayFavor = Math.Max(0f, _teamAutoFavorPerDay.Value);
+        if (elapsedDays <= 0 || perDayFavor <= 0f)
+        {
+            return;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            return;
+        }
+
+        var teammates = GetPlayerTeamMembers(player);
+        if (teammates.Count == 0)
+        {
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo($"Team auto favor skipped from {source}: no current player teammates for {elapsedDays} elapsed days.");
+            }
+
+            return;
+        }
+
+        var favorToGrant = perDayFavor * elapsedDays;
+        var affectedCount = 0;
+        var totalApplied = 0f;
+        var preview = new List<string>();
+
+        foreach (var teammate in teammates)
+        {
+            var applied = TryApplyAutoFavorGain(teammate, favorToGrant);
+            if (applied <= 0.001f)
+            {
+                continue;
+            }
+
+            affectedCount++;
+            totalApplied += applied;
+            if (preview.Count < 3)
+            {
+                preview.Add($"{TryGetHeroName(teammate)}+{SafeFormatValue(applied)}");
+            }
+        }
+
+        if (affectedCount <= 0)
+        {
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo(
+                    $"Team auto favor found teammates but no favor changed from {source}: days={elapsedDays}, perDay={SafeFormatValue(perDayFavor)}.");
+            }
+
+            return;
+        }
+
+        var previewText = preview.Count == 0 ? $"共{affectedCount}人" : string.Join("、", preview);
+        if (affectedCount > preview.Count)
+        {
+            previewText += $"等{affectedCount}人";
+        }
+
+        PushPlayerLog($"【同伴情谊】：{previewText}（{elapsedDays}天）");
+        LoggerInstance.LogInfo(
+            $"Team auto favor applied from {source}: days={elapsedDays}, perDay={SafeFormatValue(perDayFavor)}, recipients={affectedCount}, totalApplied={SafeFormatValue(totalApplied)}.");
+    }
+
+    private static float TryApplyAutoFavorGain(HeroData teammate, float favorToGrant)
+    {
+        if (teammate == null || favorToGrant <= 0f)
+        {
+            return 0f;
+        }
+
+        var beforeFavor = TryReadFavor(teammate);
+        var maxFavor = 0f;
+        try
+        {
+            maxFavor = teammate.GetMaxFavor(0f);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _applyingTeamAutoFavor = true;
+            teammate.ChangeFavor(favorToGrant, false, maxFavor, 1f, false);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Team auto favor failed for {TryGetHeroName(teammate)}: {ex.Message}");
+            return 0f;
+        }
+        finally
+        {
+            _applyingTeamAutoFavor = false;
+        }
+
+        var afterFavor = TryReadFavor(teammate);
+        if (beforeFavor.HasValue && afterFavor.HasValue)
+        {
+            return Mathf.Max(0f, afterFavor.Value - beforeFavor.Value);
+        }
+
+        return favorToGrant;
+    }
+
+    private static List<HeroData> GetPlayerTeamMembers(HeroData player)
+    {
+        var results = new List<HeroData>();
+        var seenHeroIds = new HashSet<int>();
+        var playerId = TryGetHeroId(player);
+
+        void AddHero(HeroData? hero, bool listedByPlayer)
+        {
+            if (hero == null || IsPlayerHero(hero))
+            {
+                return;
+            }
+
+            if (!TryIsHeroInTeam(hero))
+            {
+                return;
+            }
+
+            if (!listedByPlayer && !IsCurrentPlayerTeamMate(hero, playerId))
+            {
+                return;
+            }
+
+            var heroId = TryGetHeroId(hero);
+            if (heroId.HasValue && !seenHeroIds.Add(heroId.Value))
+            {
+                return;
+            }
+
+            results.Add(hero);
+        }
+
+        try
+        {
+            var teamMateIds = player.teamMates;
+            if (teamMateIds != null)
+            {
+                for (var i = 0; i < teamMateIds.Count; i++)
+                {
+                    AddHero(GameController.Instance?.worldData?.GetHero(teamMateIds[i]), listedByPlayer: true);
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var worldHeroes = GameController.Instance?.worldData?.Heros;
+            if (worldHeroes != null)
+            {
+                for (var i = 0; i < worldHeroes.Count; i++)
+                {
+                    AddHero(worldHeroes[i], listedByPlayer: false);
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return results;
+    }
+
+    private static bool IsCurrentPlayerTeamMate(HeroData hero, int? playerId)
+    {
+        if (hero == null || !TryIsHeroInTeam(hero))
+        {
+            return false;
+        }
+
+        if (TryIsHeroRecruitedByPlayer(hero))
+        {
+            return true;
+        }
+
+        var teamLeader = TryGetHeroTeamLeaderId(hero);
+        return playerId.HasValue && teamLeader.HasValue && teamLeader.Value == playerId.Value;
     }
 
     private static void TryRollDailySkillInsight(int dayIndex, int totalDays, string source)

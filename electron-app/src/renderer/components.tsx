@@ -46,6 +46,8 @@ export function defaultSettings(): VisibleSettings {
     merchantCarryCash: 100000,
     luckyHitChancePercent: 0,
     extraRelationshipGainChancePercent: 0,
+    teamAutoFavorEnabled: true,
+    teamAutoFavorPerDay: 5,
     debatePlayerDamageTakenMultiplier: 1,
     debateEnemyDamageTakenMultiplier: 1,
     craftRandomPickUpgrade: true,

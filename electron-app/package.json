@@ -2,7 +2,7 @@
   "name": "longyin-plus-electron",
   "author": "Zhihong0321",
   "private": true,
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "龙胤立志传 Pro Max 的便携式 Electron 启动器与更新器",
   "main": "dist/main/main.js",
   "type": "commonjs",

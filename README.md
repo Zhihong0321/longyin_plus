@@ -77,6 +77,49 @@
 .\git-push-ota.ps1 -SkipBuild
 ```
 
+## 开发工具
+
+当前仓库的模组开发工具链默认使用仓库内置的便携式 .NET：
+
+- `.codex-tools/dotnet/dotnet.exe`
+- 已在本机验证的 SDK 版本：`6.0.428`
+- C# 脚本工具固定为 `dotnet-script 1.5.0`
+
+之所以固定到 `1.5.0`，是因为 `dotnet-script 1.6.0+` 已改为 `net8.0/net9.0`，不能直接跑在当前这套便携式 .NET 6 工具链上。
+
+第一次使用或更新本地工具时，运行：
+
+```powershell
+.\scripts\restore-tools.ps1
+```
+
+运行任意 `.csx` 脚本时，使用：
+
+```powershell
+.\scripts\run-csharp-script.ps1 `
+  -ScriptPath .\scripts\csharp\inspect-interop-type.csx `
+  -ScriptArguments '.\dist\BepInEx\interop\Assembly-CSharp.dll', 'PlotController', 'false', 'skip', 'auto', 'choice', 'plot'
+```
+
+检查互操作程序集中的某个类型时，优先使用封装好的命令：
+
+```powershell
+.\scripts\inspect-interop-type.ps1 -TypeName PlotController
+```
+
+使用约定：
+
+- `mod-src/build-il2cpp-plugin.ps1` 仍然是唯一受支持的插件编译入口。
+- PowerShell 负责文件编排、构建、日志、部署和仓库自动化。
+- `dotnet-script` 只用于 C# 反射、互操作程序集探查、Harmony 目标发现、枚举转储这类分析型工作。
+
+后续如果需要继续扩展，可以在同样的 repo-pinned 模式下补充：
+
+- `ilspycmd` 用于命令行反编译/导出
+- `gh` 用于 OTA Release 检查与发布辅助
+- BepInEx 日志 tail 脚本
+- 带“游戏已关闭检查 + DLL 备份”的安全部署脚本
+
 ## 手动安装
 
 如果你不想通过 Electron 应用安装，也可以手动把 `dist/` 里的内容复制到游戏根目录。

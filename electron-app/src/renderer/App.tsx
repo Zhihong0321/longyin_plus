@@ -857,6 +857,20 @@ export function App() {
                   suffix="%"
                 />
                 <CheckboxField
+                  label="队友每日自动加好感"
+                  value={settings.teamAutoFavorEnabled}
+                  onChange={(value) => updateSetting('teamAutoFavorEnabled', value)}
+                  hint="当前队伍中的已招募 NPC 会在每个游戏日自动获得好感。"
+                />
+                <NumberField
+                  label="队友每日自动加好感点数"
+                  value={settings.teamAutoFavorPerDay}
+                  onChange={(value) => updateSetting('teamAutoFavorPerDay', value)}
+                  min={0}
+                  max={999}
+                  step={1}
+                />
+                <CheckboxField
                   label="选定结果 +1 大阶重掷"
                   value={settings.craftRandomPickUpgrade}
                   onChange={(value) => updateSetting('craftRandomPickUpgrade', value)}

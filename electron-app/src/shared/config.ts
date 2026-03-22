@@ -56,6 +56,8 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   merchantCarryCash: 100000,
   luckyHitChancePercent: 0,
   extraRelationshipGainChancePercent: 0,
+  teamAutoFavorEnabled: true,
+  teamAutoFavorPerDay: 5,
   debatePlayerDamageTakenMultiplier: 1,
   debateEnemyDamageTakenMultiplier: 1,
   craftRandomPickUpgrade: true,
@@ -355,8 +357,14 @@ IgnoreCarryWeight = ${boolText(settings.ignoreCarryWeight)}
 
 [Commerce]
 MerchantCarryCash = ${settings.merchantCarryCash}
+
+[MoneyLuck]
 LuckyHitChancePercent = ${settings.luckyHitChancePercent}
+
+[Relationship]
 ExtraRelationshipGainChancePercent = ${settings.extraRelationshipGainChancePercent}
+TeamAutoFavorEnabled = ${boolText(settings.teamAutoFavorEnabled)}
+TeamAutoFavorPerDay = ${formatFloat(settings.teamAutoFavorPerDay)}
 
 [Debate]
 PlayerDamageTakenMultiplier = ${formatFloat(settings.debatePlayerDamageTakenMultiplier)}
@@ -508,6 +516,8 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     merchantCarryCash: Math.round(clamp(input.merchantCarryCash, 0, 999999999)),
     luckyHitChancePercent: Math.round(clamp(input.luckyHitChancePercent, 0, 100)),
     extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
+    teamAutoFavorEnabled: input.teamAutoFavorEnabled,
+    teamAutoFavorPerDay: clamp(input.teamAutoFavorPerDay, 0, 999),
     debatePlayerDamageTakenMultiplier: clamp(input.debatePlayerDamageTakenMultiplier, 0, 999),
     debateEnemyDamageTakenMultiplier: clamp(input.debateEnemyDamageTakenMultiplier, 0, 999),
     craftRandomPickUpgrade: input.craftRandomPickUpgrade,
@@ -536,6 +546,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
 function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const dialogFlowSection = getIniSectionBody(text, 'DialogFlow');
   const dailySkillInsightSection = getIniSectionBody(text, 'DailySkillInsight');
+  const relationshipSection = getIniSectionBody(text, 'Relationship');
   const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
 
   return {
@@ -553,9 +564,19 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
     merchantCarryCash: readInt(text, 'MerchantCarryCash', DEFAULT_VISIBLE_SETTINGS.merchantCarryCash),
     luckyHitChancePercent: readInt(text, 'LuckyHitChancePercent', DEFAULT_VISIBLE_SETTINGS.luckyHitChancePercent),
     extraRelationshipGainChancePercent: readInt(
-      text,
+      relationshipSection ?? text,
       'ExtraRelationshipGainChancePercent',
       DEFAULT_VISIBLE_SETTINGS.extraRelationshipGainChancePercent
+    ),
+    teamAutoFavorEnabled: readBool(
+      relationshipSection ?? text,
+      'TeamAutoFavorEnabled',
+      DEFAULT_VISIBLE_SETTINGS.teamAutoFavorEnabled
+    ),
+    teamAutoFavorPerDay: readFloat(
+      relationshipSection ?? text,
+      'TeamAutoFavorPerDay',
+      DEFAULT_VISIBLE_SETTINGS.teamAutoFavorPerDay
     ),
     debatePlayerDamageTakenMultiplier: readFloat(
       text,
@@ -813,12 +834,27 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   nextMain = upsertIniValue(nextMain, 'CarryWeightCap', formatFloat(normalized.carryWeightCap));
   nextMain = upsertIniValue(nextMain, 'IgnoreCarryWeight', boolText(normalized.ignoreCarryWeight));
   nextMain = upsertIniValue(nextMain, 'MerchantCarryCash', String(normalized.merchantCarryCash));
-  nextMain = upsertIniValue(nextMain, 'LuckyHitChancePercent', String(normalized.luckyHitChancePercent));
-  nextMain = upsertIniValue(
+  nextMain = upsertIniSectionValue(nextMain, 'MoneyLuck', 'LuckyHitChancePercent', String(normalized.luckyHitChancePercent));
+  nextMain = removeIniSectionValue(nextMain, 'Commerce', 'LuckyHitChancePercent');
+  nextMain = upsertIniSectionValue(
     nextMain,
+    'Relationship',
     'ExtraRelationshipGainChancePercent',
     String(normalized.extraRelationshipGainChancePercent)
   );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'TeamAutoFavorEnabled',
+    boolText(normalized.teamAutoFavorEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'TeamAutoFavorPerDay',
+    formatFloat(normalized.teamAutoFavorPerDay)
+  );
+  nextMain = removeIniSectionValue(nextMain, 'Commerce', 'ExtraRelationshipGainChancePercent');
   nextMain = upsertIniValue(
     nextMain,
     'PlayerDamageTakenMultiplier',

@@ -18,6 +18,8 @@ export interface VisibleSettings {
   merchantCarryCash: number;
   luckyHitChancePercent: number;
   extraRelationshipGainChancePercent: number;
+  teamAutoFavorEnabled: boolean;
+  teamAutoFavorPerDay: number;
   debatePlayerDamageTakenMultiplier: number;
   debateEnemyDamageTakenMultiplier: number;
   craftRandomPickUpgrade: boolean;
