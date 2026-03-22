@@ -9,7 +9,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.14")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.15")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -3774,10 +3774,19 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         var beforeFavor = TryReadFavor(teammate);
-        var maxFavor = 0f;
+        if (!beforeFavor.HasValue)
+        {
+            return 0f;
+        }
+
+        var targetFavor = beforeFavor.Value + favorToGrant;
         try
         {
-            maxFavor = teammate.GetMaxFavor(0f);
+            var maxFavor = teammate.GetMaxFavor(targetFavor);
+            if (maxFavor > 0f)
+            {
+                targetFavor = Mathf.Min(targetFavor, maxFavor);
+            }
         }
         catch
         {
@@ -3786,7 +3795,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         try
         {
             _applyingTeamAutoFavor = true;
-            teammate.ChangeFavor(favorToGrant, false, maxFavor, 1f, false);
+            teammate.SetFavor(targetFavor, false);
         }
         catch (Exception ex)
         {
@@ -3799,12 +3808,12 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         var afterFavor = TryReadFavor(teammate);
-        if (beforeFavor.HasValue && afterFavor.HasValue)
+        if (afterFavor.HasValue)
         {
             return Mathf.Max(0f, afterFavor.Value - beforeFavor.Value);
         }
 
-        return favorToGrant;
+        return 0f;
     }
 
     private static List<HeroData> GetPlayerTeamMembers(HeroData player)
