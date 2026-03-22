@@ -60,6 +60,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
   teamAutoFavorPerDay: 5,
+  teamStayDurationMultiplier: 3,
   debatePlayerDamageTakenMultiplier: 1,
   debateEnemyDamageTakenMultiplier: 1,
   craftRandomPickUpgrade: true,
@@ -370,6 +371,7 @@ LuckyHitChancePercent = ${settings.luckyHitChancePercent}
 ExtraRelationshipGainChancePercent = ${settings.extraRelationshipGainChancePercent}
 TeamAutoFavorEnabled = ${boolText(settings.teamAutoFavorEnabled)}
 TeamAutoFavorPerDay = ${formatFloat(settings.teamAutoFavorPerDay)}
+TeamStayDurationMultiplier = ${formatFloat(settings.teamStayDurationMultiplier)}
 
 [Debate]
 PlayerDamageTakenMultiplier = ${formatFloat(settings.debatePlayerDamageTakenMultiplier)}
@@ -526,6 +528,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
     teamAutoFavorEnabled: input.teamAutoFavorEnabled,
     teamAutoFavorPerDay: clamp(input.teamAutoFavorPerDay, 0, 999),
+    teamStayDurationMultiplier: clamp(input.teamStayDurationMultiplier, 0.1, 999),
     debatePlayerDamageTakenMultiplier: clamp(input.debatePlayerDamageTakenMultiplier, 0, 999),
     debateEnemyDamageTakenMultiplier: clamp(input.debateEnemyDamageTakenMultiplier, 0, 999),
     craftRandomPickUpgrade: input.craftRandomPickUpgrade,
@@ -591,6 +594,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       relationshipSection ?? text,
       'TeamAutoFavorPerDay',
       DEFAULT_VISIBLE_SETTINGS.teamAutoFavorPerDay
+    ),
+    teamStayDurationMultiplier: readFloat(
+      relationshipSection ?? text,
+      'TeamStayDurationMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.teamStayDurationMultiplier
     ),
     debatePlayerDamageTakenMultiplier: readFloat(
       text,
@@ -877,6 +885,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'Relationship',
     'TeamAutoFavorPerDay',
     formatFloat(normalized.teamAutoFavorPerDay)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'TeamStayDurationMultiplier',
+    formatFloat(normalized.teamStayDurationMultiplier)
   );
   nextMain = removeIniSectionValue(nextMain, 'Commerce', 'ExtraRelationshipGainChancePercent');
   nextMain = upsertIniValue(

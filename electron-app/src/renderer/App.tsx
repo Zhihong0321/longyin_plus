@@ -876,6 +876,15 @@ export function App() {
                   max={999}
                   step={1}
                 />
+                <NumberField
+                  label="队友离队天数倍率"
+                  value={settings.teamStayDurationMultiplier}
+                  onChange={(value) => updateSetting('teamStayDurationMultiplier', value)}
+                  min={0.1}
+                  max={999}
+                  step={0.25}
+                  hint="临时入队 NPC 的停留时间按这个倍率缩放。3 倍约等于 90 天。"
+                />
                 <CheckboxField
                   label="选定结果 +1 大阶重掷"
                   value={settings.craftRandomPickUpgrade}

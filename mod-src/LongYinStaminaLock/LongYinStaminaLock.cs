@@ -9,7 +9,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.15")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.16")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -58,6 +58,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
     private static ConfigEntry<float> _teamAutoFavorPerDay = null!;
+    private static ConfigEntry<float> _teamStayDurationMultiplier = null!;
     private static ConfigEntry<float> _debatePlayerDamageTakenMultiplier = null!;
     private static ConfigEntry<float> _debateEnemyDamageTakenMultiplier = null!;
     private static ConfigEntry<bool> _craftRandomPickUpgradeEnabled = null!;
@@ -99,6 +100,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static float _lastDrinkEnemyFillAmount = float.NaN;
     private static bool? _lastResolvedDrinkTargetIsPlayer;
     private static readonly Dictionary<string, int> _dialogMonthlyUseCounts = new(StringComparer.Ordinal);
+    private static readonly Dictionary<int, int> _teamStayAdjustedAutoLeaveDays = new();
     private static HeroData? _activeDialogHero;
     private static int _activeDialogHeroId = -1;
     private static bool _dialogFastForwardAssistOwnsSkip;
@@ -118,6 +120,15 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     {
         public string BeforeText { get; init; } = "Date: unavailable";
         public TimeData? BeforeDate { get; init; }
+    }
+
+    private sealed class TeamStayJoinState
+    {
+        public HeroData? Hero { get; init; }
+        public int HeroId { get; init; } = -1;
+        public bool WasInTeam { get; init; }
+        public bool WasRecruitedByPlayer { get; init; }
+        public int? AutoLeaveTeamDayBefore { get; init; }
     }
 
     private sealed class TeachSkillSplashState
@@ -190,6 +201,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
         _teamAutoFavorPerDay = Config.Bind("Relationship", "TeamAutoFavorPerDay", 5f, "Favor granted to each current player teammate per elapsed in-game day.");
+        _teamStayDurationMultiplier = Config.Bind("Relationship", "TeamStayDurationMultiplier", 3f, "Multiplies how long temporary recruited teammates stay before asking to leave. Vanilla is about 30 days, so 3 means about 90 days.");
         _debatePlayerDamageTakenMultiplier = Config.Bind("Debate", "PlayerDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the player side when a round is lost.");
         _debateEnemyDamageTakenMultiplier = Config.Bind("Debate", "EnemyDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the enemy side when a round is won.");
         _craftRandomPickUpgradeEnabled = Config.Bind("Craft", "RandomPickUpgrade", true, "Uses the picked craft result as the base item, then regenerates it toward the next major tier.");
@@ -232,6 +244,11 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(PlotController), nameof(PlotController.SetSkipPlot), new[] { typeof(bool) }, null, nameof(DialogFastForwardSetSkipPlotPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ShowHeroInteractUI), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageMeetNpcPlot), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.FriendAskJoin), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.NewAskJoin), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.NewAskJoinResult), new[] { typeof(string) }, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.AskHeroJoinTeamTemp), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.SureHeroJoinTeamTemp), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.Update), Type.EmptyTypes, null, nameof(DialogChoiceRowPostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.OnClick), Type.EmptyTypes, nameof(DialogChoiceClickPrefix), null);
         PatchMethod(typeof(BuildChoiceButtonController), nameof(BuildChoiceButtonController.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
@@ -291,6 +308,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
         Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
+        Log.LogInfo($"Temporary teammate stay multiplier starts at x{FormatConfigFloat(Math.Max(0.01f, _teamStayDurationMultiplier.Value))}.");
         Log.LogInfo($"Debate player damage taken multiplier starts at x{FormatConfigFloat(_debatePlayerDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Debate enemy damage taken multiplier starts at x{FormatConfigFloat(_debateEnemyDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Craft picked-result major-tier upgrade starts {(_craftRandomPickUpgradeEnabled.Value ? "ON" : "OFF")}.");
@@ -1702,6 +1720,24 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         CacheActiveDialogHero(__0);
     }
 
+    private static void TeamStayJoinFlowPrefix(out TeamStayJoinState __state)
+    {
+        var hero = ResolveTrackedDialogHero();
+        __state = new TeamStayJoinState
+        {
+            Hero = hero,
+            HeroId = TryGetHeroId(hero) ?? -1,
+            WasInTeam = TryIsHeroInTeam(hero),
+            WasRecruitedByPlayer = TryIsHeroRecruitedByPlayer(hero),
+            AutoLeaveTeamDayBefore = TryReadAutoLeaveTeamDay(hero)
+        };
+    }
+
+    private static void TeamStayJoinFlowPostfix(TeamStayJoinState __state, MethodBase __originalMethod)
+    {
+        TryApplyTeamStayDurationMultiplier(__state, DescribeMethod(__originalMethod));
+    }
+
     private static void DialogChoiceRowPostfix(PlotInteractController __instance)
     {
         if (__instance?.choiceData == null)
@@ -1762,6 +1798,115 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     {
         _activeDialogHero = hero;
         _activeDialogHeroId = TryGetHeroId(hero) ?? -1;
+    }
+
+    private static HeroData? ResolveTrackedDialogHero()
+    {
+        if (_activeDialogHero != null)
+        {
+            return _activeDialogHero;
+        }
+
+        if (_activeDialogHeroId < 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return GameController.Instance?.worldData?.GetHero(_activeDialogHeroId);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void TryApplyTeamStayDurationMultiplier(TeamStayJoinState state, string source)
+    {
+        var multiplier = Math.Max(0.01f, _teamStayDurationMultiplier.Value);
+        var hero = state.Hero ?? ResolveTrackedDialogHero();
+        var heroId = state.HeroId >= 0 ? state.HeroId : TryGetHeroId(hero) ?? -1;
+        if (hero == null || heroId < 0)
+        {
+            return;
+        }
+
+        var isInTeam = TryIsHeroInTeam(hero);
+        var recruitedByPlayer = TryIsHeroRecruitedByPlayer(hero);
+        if (!isInTeam || !recruitedByPlayer)
+        {
+            _teamStayAdjustedAutoLeaveDays.Remove(heroId);
+            return;
+        }
+
+        var currentAutoLeaveTeamDay = TryReadAutoLeaveTeamDay(hero);
+        if (!currentAutoLeaveTeamDay.HasValue || currentAutoLeaveTeamDay.Value <= 0)
+        {
+            _teamStayAdjustedAutoLeaveDays.Remove(heroId);
+            return;
+        }
+
+        var newlyJoined = !state.WasInTeam || !state.WasRecruitedByPlayer;
+        var deadlineChanged = !state.AutoLeaveTeamDayBefore.HasValue || state.AutoLeaveTeamDayBefore.Value != currentAutoLeaveTeamDay.Value;
+        if (!newlyJoined && !deadlineChanged)
+        {
+            return;
+        }
+
+        if (_teamStayAdjustedAutoLeaveDays.TryGetValue(heroId, out var lastAdjusted) && lastAdjusted == currentAutoLeaveTeamDay.Value)
+        {
+            return;
+        }
+
+        var scaledAutoLeaveTeamDay = TryScaleAutoLeaveTeamDay(currentAutoLeaveTeamDay.Value, multiplier, out var interpretation);
+        if (!scaledAutoLeaveTeamDay.HasValue || scaledAutoLeaveTeamDay.Value == currentAutoLeaveTeamDay.Value)
+        {
+            return;
+        }
+
+        if (!TryWriteAutoLeaveTeamDay(hero, scaledAutoLeaveTeamDay.Value))
+        {
+            LoggerInstance.LogWarning(
+                $"Temporary teammate stay multiplier failed for {TryGetHeroName(hero)} from {source}: current={currentAutoLeaveTeamDay.Value}, target={scaledAutoLeaveTeamDay.Value}, multiplier={SafeFormatValue(multiplier)}.");
+            return;
+        }
+
+        _teamStayAdjustedAutoLeaveDays[heroId] = scaledAutoLeaveTeamDay.Value;
+        LoggerInstance.LogInfo(
+            $"Temporary teammate stay multiplier applied for {TryGetHeroName(hero)} from {source}: {currentAutoLeaveTeamDay.Value} -> {scaledAutoLeaveTeamDay.Value}, mode={interpretation}, multiplier={SafeFormatValue(multiplier)}.");
+    }
+
+    private static int? TryScaleAutoLeaveTeamDay(int currentAutoLeaveTeamDay, float multiplier, out string interpretation)
+    {
+        interpretation = "unknown";
+        if (currentAutoLeaveTeamDay <= 0)
+        {
+            return null;
+        }
+
+        if (currentAutoLeaveTeamDay <= 366)
+        {
+            interpretation = "relative-days";
+            return Math.Max(1, (int)Math.Ceiling(currentAutoLeaveTeamDay * multiplier));
+        }
+
+        var currentDate = TryGetWorldDateSnapshot();
+        if (currentDate == null)
+        {
+            return null;
+        }
+
+        var currentDateSerial = ApproximateDateSerial(currentDate);
+        var remainingDays = currentAutoLeaveTeamDay - currentDateSerial;
+        if (remainingDays <= 0 || remainingDays > 366)
+        {
+            return null;
+        }
+
+        interpretation = "absolute-deadline";
+        var scaledRemainingDays = Math.Max(1, (int)Math.Ceiling(remainingDays * multiplier));
+        return currentDateSerial + scaledRemainingDays;
     }
 
     private static bool TryHandleTreasureChestChoiceClick(SinglePlotChoiceData choice)
@@ -3280,6 +3425,69 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
     }
 
+    private static int? TryReadAutoLeaveTeamDay(HeroData? hero)
+    {
+        if (hero == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return hero.autoLeaveTeamDay;
+        }
+        catch
+        {
+            var value = SafeProperty(hero, "autoLeaveTeamDay") ?? SafeField(hero, "autoLeaveTeamDay");
+            return TryConvertToInt(value);
+        }
+    }
+
+    private static bool TryWriteAutoLeaveTeamDay(HeroData? hero, int value)
+    {
+        if (hero == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            hero.autoLeaveTeamDay = value;
+            return true;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var property = hero.GetType().GetProperty("autoLeaveTeamDay", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (property != null && property.CanWrite)
+            {
+                property.SetValue(hero, value);
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var field = hero.GetType().GetField("autoLeaveTeamDay", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null)
+            {
+                field.SetValue(hero, value);
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
     private static int? TryGetHeroTeamLeaderId(HeroData? hero)
     {
         if (hero == null)
@@ -4261,9 +4469,14 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
     private static int ApproximateElapsedDayCount(TimeData fromDate, TimeData toDate)
     {
-        var fromSerial = (fromDate.year * 372) + (fromDate.month * 31) + fromDate.day;
-        var toSerial = (toDate.year * 372) + (toDate.month * 31) + toDate.day;
+        var fromSerial = ApproximateDateSerial(fromDate);
+        var toSerial = ApproximateDateSerial(toDate);
         return Math.Max(0, toSerial - fromSerial);
+    }
+
+    private static int ApproximateDateSerial(TimeData date)
+    {
+        return (date.year * 372) + (date.month * 31) + date.day;
     }
 
     private static int CompareDates(TimeData left, TimeData right)

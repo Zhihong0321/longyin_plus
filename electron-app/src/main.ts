@@ -67,6 +67,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
   teamAutoFavorPerDay: 5,
+  teamStayDurationMultiplier: 3,
   debatePlayerDamageTakenMultiplier: 1,
   debateEnemyDamageTakenMultiplier: 1,
   craftRandomPickUpgrade: true,
