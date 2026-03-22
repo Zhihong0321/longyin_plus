@@ -388,6 +388,86 @@ button {
   border: 1px solid rgba(168, 34, 34, 0.18);
 }
 
+.error-banner__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.error-banner__head > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.error-banner__head span {
+  color: rgba(122, 28, 28, 0.8);
+  font-size: 0.88rem;
+}
+
+.error-banner__body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.copy-banner {
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: rgba(13, 111, 95, 0.12);
+  color: var(--accent-2);
+  border: 1px solid rgba(13, 111, 95, 0.18);
+  font-weight: 700;
+}
+
+.progress-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(13, 111, 95, 0.08);
+  border: 1px solid rgba(13, 111, 95, 0.14);
+  box-shadow: var(--shadow);
+}
+
+.progress-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-card__head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.progress-card__head span {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.progress-bar {
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(13, 111, 95, 0.12);
+  overflow: hidden;
+}
+
+.progress-bar__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-2), #3aa58c, #d6a15e);
+  transition: width 180ms ease;
+}
+
 .nav-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -466,6 +546,38 @@ button {
   font-size: 0.94rem;
   line-height: 1.55;
   word-break: break-all;
+}
+
+.log-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.log-preview {
+  min-height: 280px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.log-preview__head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(13, 111, 95, 0.05);
+}
+
+.log-preview__body {
+  margin: 0;
+  padding: 14px;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Consolas", "Cascadia Mono", monospace;
+  font-size: 0.86rem;
+  line-height: 1.5;
 }
 
 .stat-line {
@@ -733,7 +845,8 @@ button {
   .summary-grid,
   .overview-layout,
   .updates-layout,
-  .panel-grid {
+  .panel-grid,
+  .log-preview-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -751,7 +864,8 @@ button {
   .overview-layout,
   .updates-layout,
   .panel-grid,
-  .field-grid {
+  .field-grid,
+  .log-preview-grid {
     grid-template-columns: 1fr;
   }
 

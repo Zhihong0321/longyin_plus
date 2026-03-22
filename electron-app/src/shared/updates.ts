@@ -80,6 +80,24 @@ async function downloadJson(url: string): Promise<any> {
   return response.json();
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 B';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const digits = value >= 100 || unitIndex === 0 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
+}
+
 function normalizeRelease(releaseJson: any, isLatest: boolean): ReleaseHistoryItem {
   const version = String(releaseJson.tag_name ?? releaseJson.name ?? '').replace(/^v/i, '').trim();
 
@@ -94,7 +112,7 @@ function normalizeRelease(releaseJson: any, isLatest: boolean): ReleaseHistoryIt
   };
 }
 
-async function downloadBuffer(url: string): Promise<Buffer> {
+async function downloadBuffer(url: string, onProgress?: (detail: string, percent?: number) => void): Promise<Buffer> {
   const response = await fetch(url, {
     headers: {
       Accept: 'application/octet-stream',
@@ -106,8 +124,52 @@ async function downloadBuffer(url: string): Promise<Buffer> {
     throw new Error(`下载失败 ${url}：${response.status} ${response.statusText}`);
   }
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  return Buffer.from(bytes);
+  const contentLength = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+  const totalBytes = Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined;
+
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    onProgress?.(`更新包下载完成，大小 ${formatBytes(bytes.byteLength)}。`, 100);
+    return Buffer.from(bytes);
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let receivedBytes = 0;
+  let lastPercent = -1;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    if (!value || value.byteLength === 0) {
+      continue;
+    }
+
+    const chunk = Buffer.from(value);
+    chunks.push(chunk);
+    receivedBytes += chunk.length;
+
+    if (totalBytes) {
+      const percent = Math.max(1, Math.min(99, Math.round((receivedBytes / totalBytes) * 100)));
+      if (percent !== lastPercent) {
+        lastPercent = percent;
+        onProgress?.(
+          `正在下载更新包：${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`,
+          percent
+        );
+      }
+    }
+    else {
+      onProgress?.(`正在下载更新包：已接收 ${formatBytes(receivedBytes)}`);
+    }
+  }
+
+  const buffer = Buffer.concat(chunks);
+  onProgress?.(`更新包下载完成，大小 ${formatBytes(buffer.length)}。`, 100);
+  return buffer;
 }
 
 async function writeBuffer(filePath: string, buffer: Buffer): Promise<void> {
@@ -195,22 +257,31 @@ export async function fetchReleaseHistory(limit = 8): Promise<ReleaseHistoryItem
     .map((release: any, index: number) => normalizeRelease(release, index === 0));
 }
 
-export async function stageGitHubUpdate(manifest: UpdateManifest): Promise<{ stageRoot: string; manifest: UpdateManifest }> {
+export async function stageGitHubUpdate(
+  manifest: UpdateManifest,
+  onProgress?: (detail: string, percent?: number) => void
+): Promise<{ stageRoot: string; manifest: UpdateManifest }> {
+  onProgress?.(`开始下载 ${manifest.zipAsset} ...`, 0);
   const zipBuffer = await downloadBuffer(
-    `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/v${manifest.version}/${manifest.zipAsset}`
+    `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/v${manifest.version}/${manifest.zipAsset}`,
+    onProgress
   );
 
+  onProgress?.('下载完成，正在校验更新包完整性...', 100);
   if (sha256(zipBuffer) !== manifest.sha256) {
     throw new Error('下载的更新包未通过 SHA-256 校验。');
   }
 
   const stageRoot = path.join(os.tmpdir(), 'longyin-plus-update', manifest.version);
   const zipPath = path.join(stageRoot, manifest.zipAsset);
+  onProgress?.('校验通过，正在准备暂存目录...', 100);
   await fs.rm(stageRoot, { recursive: true, force: true });
   await fs.mkdir(stageRoot, { recursive: true });
   await writeBuffer(zipPath, zipBuffer);
+  onProgress?.('正在解压更新包并准备替换文件...', 100);
   await extractFilteredZip(zipPath, stageRoot, manifest.preservePaths ?? ['user-data/**']);
   await fs.rm(zipPath, { force: true });
+  onProgress?.('更新文件已准备完成，正在启动后台替换程序...', 100);
   return { stageRoot, manifest };
 }
 
@@ -226,25 +297,14 @@ export async function launchUpdateHelper(
     throw new Error(`未找到 OTA 更新脚本：${helperScriptPath}`);
   }
 
-  const child = spawn('powershell.exe', [
-    '-NoLogo',
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-WindowStyle',
-    'Hidden',
-    '-File',
+  const child = spawn('cmd.exe', [
+    '/d',
+    '/c',
     helperScriptPath,
-    '-WaitPid',
     String(waitPid),
-    '-StageRoot',
     stageRoot,
-    '-TargetRoot',
     targetRoot,
-    '-AppExecutableName',
     appExecutableName,
-    '-LogPath',
     logPath
   ], {
     detached: true,

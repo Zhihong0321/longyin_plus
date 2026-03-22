@@ -76,6 +76,15 @@ export interface UpdateCheckResult {
   status?: string;
 }
 
+export type LogFileKind = 'startup' | 'ota';
+
+export interface UpdateProgressEvent {
+  stage: 'checking' | 'downloading' | 'preparing' | 'applying' | 'complete' | 'error';
+  detail: string;
+  percent?: number;
+  timestamp: string;
+}
+
 export interface HealthCheckResult {
   key: string;
   label: string;

@@ -24,9 +24,11 @@ import {
   GAME_EXE_NAME,
   GameHealth,
   GameSnapshot,
+  LogFileKind,
   OperationResult,
   ReleaseHistoryItem,
   UpdateCheckResult,
+  UpdateProgressEvent,
   VisibleSettings
 } from './shared/types';
 
@@ -44,8 +46,8 @@ const SETTINGS_PATH = path.join(USER_DATA_ROOT, 'settings.json');
 const STARTUP_LOG_PATH = path.join(USER_DATA_ROOT, 'startup.log');
 const OTA_LOG_PATH = path.join(USER_DATA_ROOT, 'ota-update.log');
 const OTA_HELPER_SCRIPT_PATH = IS_PACKAGED
-  ? path.join(process.resourcesPath, 'updater', 'apply-ota-update.ps1')
-  : path.resolve(APP_CONTENT_ROOT, 'scripts', 'apply-ota-update.ps1');
+  ? path.join(process.resourcesPath, 'updater', 'apply-ota-update.cmd')
+  : path.resolve(APP_CONTENT_ROOT, 'scripts', 'apply-ota-update.cmd');
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
@@ -112,6 +114,45 @@ async function writeStartupLog(message: string): Promise<void> {
   const line = `[${new Date().toISOString()}] ${message}\n`;
   await fs.mkdir(USER_DATA_ROOT, { recursive: true });
   await fs.appendFile(STARTUP_LOG_PATH, line, 'utf8').catch(() => undefined);
+}
+
+async function appendLog(filePath: string, message: string): Promise<void> {
+  const line = `[${new Date().toISOString()}] ${message}\n`;
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.appendFile(filePath, line, 'utf8').catch(() => undefined);
+}
+
+function emitUpdateProgress(stage: UpdateProgressEvent['stage'], detail: string, percent?: number): void {
+  const payload: UpdateProgressEvent = {
+    stage,
+    detail,
+    percent,
+    timestamp: new Date().toISOString()
+  };
+
+  void writeStartupLog(`[UpdateProgress][${stage}] ${detail}`);
+  if (stage === 'applying' || stage === 'complete' || stage === 'error') {
+    void appendLog(OTA_LOG_PATH, `[${stage}] ${detail}`);
+  }
+
+  mainWindow?.webContents.send('app:update-progress', payload);
+}
+
+async function readLogFile(kind: LogFileKind): Promise<string> {
+  const targetPath = kind === 'ota' ? OTA_LOG_PATH : STARTUP_LOG_PATH;
+
+  try {
+    const text = await fs.readFile(targetPath, 'utf8');
+    const normalized = text.replace(/\r\n/g, '\n').trim();
+    if (!normalized) {
+      return '日志文件已存在，但当前没有内容。';
+    }
+
+    return normalized.split('\n').slice(-160).join('\n');
+  }
+  catch {
+    return `尚未生成 ${kind === 'ota' ? 'ota-update.log' : 'startup.log'}。`;
+  }
 }
 
 async function ensureAppDirectories(): Promise<void> {
@@ -429,29 +470,43 @@ async function getReleaseHistory(): Promise<ReleaseHistoryItem[]> {
 }
 
 async function applyUpdate(): Promise<OperationResult> {
-  const update = await checkUpdates();
-  if (!update.updateAvailable || !update.manifest) {
-    throw new Error(update.status ?? '暂无可用更新。');
+  emitUpdateProgress('checking', '正在检查是否有新版本...', 0);
+
+  try {
+    const update = await checkUpdates();
+    if (!update.updateAvailable || !update.manifest) {
+      throw new Error(update.status ?? '暂无可用更新。');
+    }
+
+    emitUpdateProgress('checking', `发现新版本 ${update.latestVersion}，准备下载更新包...`, 5);
+    await writeStartupLog(`开始应用 OTA 更新：${update.currentVersion} -> ${update.latestVersion}`);
+    const { stageRoot } = await stageGitHubUpdate(update.manifest, (detail, percent) => {
+      emitUpdateProgress('downloading', detail, percent);
+    });
+    await writeStartupLog(`OTA 暂存目录：${stageRoot}`);
+    emitUpdateProgress('preparing', '下载和解压已完成，正在启动后台替换程序...', 100);
+    await launchUpdateHelper(
+      OTA_HELPER_SCRIPT_PATH,
+      process.pid,
+      stageRoot,
+      APP_ROOT,
+      path.basename(process.execPath),
+      OTA_LOG_PATH
+    );
+    emitUpdateProgress('applying', '后台更新器已启动，应用即将退出并自动重启。', 100);
+    void setTimeout(() => app.quit(), 250);
+
+    return {
+      ok: true,
+      message: '更新包已下载。应用将退出，后台完成替换后会自动重启。',
+      updatedSnapshot: await buildSnapshot('正在下载并应用更新，请等待自动重启。')
+    };
   }
-
-  await writeStartupLog(`开始应用 OTA 更新：${update.currentVersion} -> ${update.latestVersion}`);
-  const { stageRoot } = await stageGitHubUpdate(update.manifest);
-  await writeStartupLog(`OTA 暂存目录：${stageRoot}`);
-  await launchUpdateHelper(
-    OTA_HELPER_SCRIPT_PATH,
-    process.pid,
-    stageRoot,
-    APP_ROOT,
-    path.basename(process.execPath),
-    OTA_LOG_PATH
-  );
-  void setTimeout(() => app.quit(), 250);
-
-  return {
-    ok: true,
-    message: '更新包已下载。应用将退出，后台完成替换后会自动重启。',
-    updatedSnapshot: await buildSnapshot('正在下载并应用更新，请等待自动重启。')
-  };
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    emitUpdateProgress('error', `应用更新失败：${message}`);
+    throw error;
+  }
 }
 
 async function setGameRoot(nextGameRoot: string): Promise<GameSnapshot> {
@@ -536,6 +591,7 @@ function registerIpc(): void {
   ipcMain.handle('app:check-updates', async () => checkUpdates());
   ipcMain.handle('app:get-release-history', async () => getReleaseHistory());
   ipcMain.handle('app:apply-update', async () => applyUpdate());
+  ipcMain.handle('app:read-log-file', async (_event, kind: LogFileKind) => readLogFile(kind));
   ipcMain.handle('app:open-path', async (_event, targetPath: string) => {
     await shell.openPath(targetPath);
   });

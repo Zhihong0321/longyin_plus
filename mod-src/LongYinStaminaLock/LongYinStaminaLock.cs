@@ -9,7 +9,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.11")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.12")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -68,6 +68,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<int> _teachSkillSameSectAreaShareMinPercent = null!;
     private static ConfigEntry<int> _teachSkillSameSectAreaShareMaxPercent = null!;
     private static ConfigEntry<float> _dialogMonthlyLimitMultiplier = null!;
+    private static ConfigEntry<bool> _dialogFastForwardAssistEnabled = null!;
+    private static ConfigEntry<KeyCode> _dialogFastForwardAssistHotkey = null!;
     private static ConfigEntry<bool> _traceMode = null!;
     private static ConfigEntry<bool> _traceTreasureChestEvents = null!;
     private static ConfigEntry<bool> _freezeDate = null!;
@@ -94,6 +96,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static readonly Dictionary<string, int> _dialogMonthlyUseCounts = new(StringComparer.Ordinal);
     private static HeroData? _activeDialogHero;
     private static int _activeDialogHeroId = -1;
+    private static bool _dialogFastForwardAssistOwnsSkip;
     private static readonly List<KungfuSkillLvData> _dailySkillInsightCandidateBuffer = new();
     private Harmony? _harmony;
 
@@ -190,6 +193,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _teachSkillSameSectAreaShareMinPercent = Config.Bind("Teaching", "SameSectAreaShareMinPercent", 80, "Minimum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
         _teachSkillSameSectAreaShareMaxPercent = Config.Bind("Teaching", "SameSectAreaShareMaxPercent", 120, "Maximum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
         _dialogMonthlyLimitMultiplier = Config.Bind("DialogFlow", "MonthlyLimitMultiplier", 3f, "Scales the monthly per-NPC interaction quota used by talk, teach, and similar meet choices.");
+        _dialogFastForwardAssistEnabled = Config.Bind("DialogFlow", "FastForwardAssistEnabled", false, "When true, the mod automatically turns on plot fast-forward (快进) whenever the current dialog actually exposes the skip button.");
+        _dialogFastForwardAssistHotkey = Config.Bind("DialogFlow", "ToggleFastForwardAssistHotkey", KeyCode.P, "Hotkey that toggles the dialog fast-forward assist while in game.");
         _traceMode = Config.Bind("Debug", "TracerEnabled", false, "Master switch for all mod tracer logs. When false, trace helpers stay silent.");
         _traceTreasureChestEvents = Config.Bind("Debug", "TraceTreasureChestEvents", false, "When TracerEnabled is true, logs treasure chest interception, choice UI, and reward resolution.");
         _freezeDate = Config.Bind("Time", "FreezeDate", false, "Blocks in-game day, month, and year progression.");
@@ -279,6 +284,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             $"Same-sect teaching splash starts {(_teachSkillSameSectAreaShareEnabled.Value ? "ON" : "OFF")} " +
             $"at {ClampTeachSkillSplashPercent(_teachSkillSameSectAreaShareMinPercent.Value)}%-{ClampTeachSkillSplashPercent(_teachSkillSameSectAreaShareMaxPercent.Value)}%.");
         Log.LogInfo($"Dialog monthly limit multiplier starts at x{FormatConfigFloat(_dialogMonthlyLimitMultiplier.Value)}.");
+        Log.LogInfo($"Dialog fast-forward assist starts {(_dialogFastForwardAssistEnabled.Value ? "ON" : "OFF")} with hotkey {_dialogFastForwardAssistHotkey.Value}.");
         Log.LogInfo($"Tracer master starts {(_traceMode.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure chest tracer starts {(_traceTreasureChestEvents.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Date freeze starts {(_freezeDate.Value ? "ON" : "OFF")} with hotkey {_freezeDateHotkey.Value}.");
@@ -1558,8 +1564,14 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         EnsureDailySkillInsightBaseline();
         TryRunRealtimeSkillInsight();
         UpdateTreasureChestChoiceSession();
+        UpdateDialogFastForwardAssist();
         KeepPlayerHorseTurboReady("Update");
         ApplyPlayerCarryWeightOverride("Update");
+
+        if (Input.GetKeyDown(_dialogFastForwardAssistHotkey.Value))
+        {
+            ToggleDialogFastForwardAssist("hotkey");
+        }
 
         if (Input.GetKeyDown(_freezeDateHotkey.Value))
         {
@@ -1587,20 +1599,46 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         ApplyDialogMonthlyQuota(__instance, __instance.choiceData, consume: false);
     }
 
-    private static void DialogChoiceClickPrefix(PlotInteractController __instance)
+    private static bool DialogChoiceClickPrefix(PlotInteractController __instance)
     {
         if (__instance?.choiceData == null)
         {
-            return;
+            return true;
         }
 
         ApplyDialogMonthlyQuota(__instance, __instance.choiceData, consume: true);
+        if (TryHandleTreasureChestChoiceClick(__instance.choiceData))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static void CacheActiveDialogHero(HeroData? hero)
     {
         _activeDialogHero = hero;
         _activeDialogHeroId = TryGetHeroId(hero) ?? -1;
+    }
+
+    private static bool TryHandleTreasureChestChoiceClick(SinglePlotChoiceData choice)
+    {
+        var choiceParam = TryGetChoiceParam(choice);
+        if (string.IsNullOrWhiteSpace(choiceParam) ||
+            !choiceParam.StartsWith(TreasureChestChoiceParamPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        TryResolveTreasureChestChoiceFromPlot(choiceParam);
+
+        var plotController = PlotController.Instance;
+        if (plotController != null)
+        {
+            TryCloseTreasureChestChoicePlot(plotController);
+        }
+
+        return true;
     }
 
     private static void ApplyDialogMonthlyQuota(PlotInteractController controller, SinglePlotChoiceData choice, bool consume)
@@ -1693,6 +1731,100 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         TrySetIndexedValue(list, (int)parsedType, Math.Max(0, remaining));
+    }
+
+    private static void UpdateDialogFastForwardAssist()
+    {
+        var plotController = PlotController.Instance;
+        if (plotController == null)
+        {
+            _dialogFastForwardAssistOwnsSkip = false;
+            return;
+        }
+
+        var shouldEnableSkip = _dialogFastForwardAssistEnabled.Value && IsDialogFastForwardCurrentlyAvailable(plotController);
+        var isCurrentlySkipping = plotController.plotSkipping;
+
+        if (shouldEnableSkip)
+        {
+            if (!isCurrentlySkipping)
+            {
+                TriggerDialogFastForward(plotController, enable: true);
+                _dialogFastForwardAssistOwnsSkip = true;
+            }
+
+            return;
+        }
+
+        if (_dialogFastForwardAssistOwnsSkip && isCurrentlySkipping)
+        {
+            TriggerDialogFastForward(plotController, enable: false);
+        }
+
+        _dialogFastForwardAssistOwnsSkip = false;
+    }
+
+    private static void TriggerDialogFastForward(PlotController plotController, bool enable)
+    {
+        try
+        {
+            var skipButton = plotController.plotSkipButton;
+            var canUseButtonPath = skipButton != null && skipButton.activeInHierarchy;
+            if (canUseButtonPath)
+            {
+                plotController.SkipPlotButtonClicked();
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Dialog fast-forward assist button path failed: {ex.Message}");
+        }
+
+        plotController.SetSkipPlot(enable);
+    }
+
+    private static bool IsDialogFastForwardCurrentlyAvailable(PlotController plotController)
+    {
+        try
+        {
+            if (HasActiveDialogChoice(plotController))
+            {
+                return false;
+            }
+
+            var skipButton = plotController.plotSkipButton;
+            return skipButton != null && skipButton.activeInHierarchy;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Dialog fast-forward assist availability check failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool HasActiveDialogChoice(PlotController plotController)
+    {
+        try
+        {
+            return plotController.plotChoiceShowing || plotController.nowChoice != null || plotController.newChoice != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void ToggleDialogFastForwardAssist(string source)
+    {
+        _dialogFastForwardAssistEnabled.Value = !_dialogFastForwardAssistEnabled.Value;
+        if (!_dialogFastForwardAssistEnabled.Value)
+        {
+            UpdateDialogFastForwardAssist();
+        }
+
+        LoggerInstance.LogInfo($"Dialog fast-forward assist {(_dialogFastForwardAssistEnabled.Value ? "enabled" : "disabled")} from {source}.");
+        PushPlayerLog($"Mod: 快进辅助 {(_dialogFastForwardAssistEnabled.Value ? "ON" : "OFF")}");
     }
 
     private static void ToggleFreezeDate(string source)

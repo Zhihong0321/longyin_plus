@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { GameSnapshot, OperationResult, ReleaseHistoryItem, UpdateCheckResult, VisibleSettings } from './shared/types';
+import type {
+  GameSnapshot,
+  LogFileKind,
+  OperationResult,
+  ReleaseHistoryItem,
+  UpdateCheckResult,
+  UpdateProgressEvent,
+  VisibleSettings
+} from './shared/types';
 
 export interface LongYinApi {
   getSnapshot: () => Promise<GameSnapshot>;
@@ -13,6 +21,8 @@ export interface LongYinApi {
   checkUpdates: () => Promise<UpdateCheckResult>;
   getReleaseHistory: () => Promise<ReleaseHistoryItem[]>;
   applyUpdate: () => Promise<OperationResult>;
+  readLogFile: (kind: LogFileKind) => Promise<string>;
+  onUpdateProgress: (callback: (event: UpdateProgressEvent) => void) => () => void;
   openPath: (targetPath: string) => Promise<void>;
   openExternal: (targetUrl: string) => Promise<void>;
 }
@@ -29,6 +39,12 @@ const api: LongYinApi = {
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
   getReleaseHistory: () => ipcRenderer.invoke('app:get-release-history'),
   applyUpdate: () => ipcRenderer.invoke('app:apply-update'),
+  readLogFile: (kind: LogFileKind) => ipcRenderer.invoke('app:read-log-file', kind),
+  onUpdateProgress: (callback: (event: UpdateProgressEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: UpdateProgressEvent) => callback(payload);
+    ipcRenderer.on('app:update-progress', listener);
+    return () => ipcRenderer.removeListener('app:update-progress', listener);
+  },
   openPath: (targetPath: string) => ipcRenderer.invoke('app:open-path', targetPath),
   openExternal: (targetUrl: string) => ipcRenderer.invoke('app:open-external', targetUrl)
 };

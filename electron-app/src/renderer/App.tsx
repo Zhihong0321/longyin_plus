@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { GameSnapshot, ReleaseHistoryItem, UpdateCheckResult, VisibleSettings } from '../shared/types';
+import type {
+  GameSnapshot,
+  ReleaseHistoryItem,
+  UpdateCheckResult,
+  UpdateProgressEvent,
+  VisibleSettings
+} from '../shared/types';
 import {
   BATTLE_TURBO_HOTKEYS,
   Card,
@@ -54,6 +60,23 @@ function releaseBodyLines(value?: string): string[] {
     .filter((line, index, all) => line.length > 0 || (index > 0 && all[index - 1].length > 0));
 }
 
+function formatProgressTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).format(date);
+}
+
+async function copyText(value: string): Promise<void> {
+  await navigator.clipboard.writeText(value);
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [settings, setSettings] = useState<VisibleSettings>(defaultSettings());
@@ -61,8 +84,14 @@ export function App() {
   const [working, setWorking] = useState<string | null>(null);
   const [message, setMessage] = useState('正在加载...');
   const [error, setError] = useState<string | null>(null);
+  const [errorTime, setErrorTime] = useState<string | null>(null);
   const [update, setUpdate] = useState<UpdateCheckResult | null>(null);
   const [releaseHistory, setReleaseHistory] = useState<ReleaseHistoryItem[]>([]);
+  const [startupLogText, setStartupLogText] = useState('正在读取 startup.log ...');
+  const [otaLogText, setOtaLogText] = useState('正在读取 ota-update.log ...');
+  const [logsBusy, setLogsBusy] = useState(false);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [updateProgressEvents, setUpdateProgressEvents] = useState<UpdateProgressEvent[]>([]);
 
   const tabs = useMemo(
     () => [
@@ -80,6 +109,16 @@ export function App() {
     setSettings((current) => mergeSettings(current, { [key]: value } as Partial<VisibleSettings>));
   };
 
+  const showError = (nextError: string) => {
+    setError(nextError);
+    setErrorTime(new Date().toISOString());
+  };
+
+  const clearError = () => {
+    setError(null);
+    setErrorTime(null);
+  };
+
   const refresh = async (nextMessage?: string, preserveMessage = false, syncSettings = true) => {
     const next = await window.longyin.getSnapshot();
     setSnapshot(next);
@@ -87,11 +126,35 @@ export function App() {
       setSettings(next.visibleSettings);
     }
     setUpdate(next.update);
-    setError(null);
     if (!preserveMessage) {
       setMessage(nextMessage ?? next.status ?? '准备就绪');
     }
     return next;
+  };
+
+  const refreshLogs = async (silent = false) => {
+    if (!silent) {
+      setLogsBusy(true);
+    }
+
+    try {
+      const [nextStartupLog, nextOtaLog] = await Promise.all([
+        window.longyin.readLogFile('startup'),
+        window.longyin.readLogFile('ota')
+      ]);
+      setStartupLogText(nextStartupLog);
+      setOtaLogText(nextOtaLog);
+    }
+    finally {
+      if (!silent) {
+        setLogsBusy(false);
+      }
+    }
+  };
+
+  const handleCopy = async (label: string, value: string) => {
+    await copyText(value);
+    setCopyNotice(`${label}已复制到剪贴板。`);
   };
 
   const refreshReleaseHistory = async (preserveMessage = false) => {
@@ -105,7 +168,7 @@ export function App() {
 
   const run = async (label: string, action: () => Promise<any>) => {
     setWorking(label);
-    setError(null);
+    clearError();
     try {
       const result = await action();
       if (result?.updatedSnapshot) {
@@ -120,7 +183,7 @@ export function App() {
       return result;
     }
     catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      showError(err instanceof Error ? err.message : String(err));
       setMessage(`无法完成${label}。`);
       return undefined;
     }
@@ -131,10 +194,11 @@ export function App() {
 
   useEffect(() => {
     void refresh().catch((err: Error) => {
-      setError(err.message);
+      showError(err.message);
       setMessage('加载状态失败。');
     });
     void refreshReleaseHistory(true).catch(() => undefined);
+    void refreshLogs(true).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -149,6 +213,45 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [snapshot]);
 
+  useEffect(() => {
+    const unsubscribe = window.longyin.onUpdateProgress((event) => {
+      setUpdateProgressEvents((current) => [...current.slice(-7), event]);
+      setMessage(event.detail);
+
+      if (event.stage === 'error') {
+        showError(event.detail);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (!copyNotice) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => setCopyNotice(null), 2200);
+    return () => window.clearTimeout(timer);
+  }, [copyNotice]);
+
+  useEffect(() => {
+    const latestEvent = updateProgressEvents[updateProgressEvents.length - 1] ?? null;
+    const needsLiveLogRefresh =
+      working === '下载更新中' ||
+      (latestEvent !== null && ['checking', 'downloading', 'preparing', 'applying'].includes(latestEvent.stage));
+
+    if (!needsLiveLogRefresh) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshLogs(true).catch(() => undefined);
+    }, 1200);
+
+    return () => window.clearInterval(timer);
+  }, [working, updateProgressEvents]);
+
   const gameRoot = snapshot?.gameRoot ?? '';
   const gameInstalled = snapshot?.gameInstalled ?? false;
   const health = snapshot?.health ?? { healthy: false, needsRepair: false, summary: '正在加载自检状态。', driftedFiles: [], checks: [] };
@@ -162,7 +265,7 @@ export function App() {
 
   const save = async () => {
     setWorking('保存中');
-    setError(null);
+    clearError();
     try {
       const nextSnapshot = await window.longyin.saveSettings(settings);
       setSnapshot(nextSnapshot);
@@ -171,7 +274,7 @@ export function App() {
       setMessage('设置已保存。');
     }
     catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      showError(err instanceof Error ? err.message : String(err));
     }
     finally {
       setWorking(null);
@@ -196,6 +299,7 @@ export function App() {
 
   const pickGameRoot = async () => {
     setWorking('选择目录');
+    clearError();
     try {
       const next = await window.longyin.pickGameRoot();
       setSnapshot(next);
@@ -204,7 +308,7 @@ export function App() {
       setMessage('游戏目录已选择。');
     }
     catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      showError(err instanceof Error ? err.message : String(err));
     }
     finally {
       setWorking(null);
@@ -213,7 +317,7 @@ export function App() {
 
   const checkUpdates = async () => {
     setWorking('检查更新');
-    setError(null);
+    clearError();
     try {
       const next = await window.longyin.checkUpdates();
       setUpdate(next);
@@ -221,7 +325,7 @@ export function App() {
       setMessage(next.status ?? '更新检查完成。');
     }
     catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      showError(err instanceof Error ? err.message : String(err));
     }
     finally {
       setWorking(null);
@@ -230,8 +334,9 @@ export function App() {
 
   const applyUpdate = async () => {
     setWorking('下载更新中');
-    setError(null);
-    setMessage('正在下载并应用更新，请不要关闭窗口。应用会先退出，再自动重启到新版本。');
+    clearError();
+    setUpdateProgressEvents([]);
+    setMessage('正在检查更新并准备下载。应用会显示当前步骤，请不要关闭窗口。');
     try {
       const result = await window.longyin.applyUpdate();
       if (result?.updatedSnapshot) {
@@ -242,7 +347,7 @@ export function App() {
       }
     }
     catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      showError(err instanceof Error ? err.message : String(err));
       setMessage('应用更新失败。请打开日志查看详细原因。');
     }
     finally {
@@ -273,6 +378,23 @@ export function App() {
       await window.longyin.openPath(userDataRoot);
     }
   };
+
+  const openStartupLog = async () => {
+    if (startupLogPath) {
+      await window.longyin.openPath(startupLogPath);
+    }
+  };
+
+  const openOtaLog = async () => {
+    if (otaLogPath) {
+      await window.longyin.openPath(otaLogPath);
+    }
+  };
+
+  const latestProgress = updateProgressEvents[updateProgressEvents.length - 1] ?? null;
+  const updateInFlight =
+    working === '下载更新中' ||
+    (latestProgress !== null && ['checking', 'downloading', 'preparing', 'applying'].includes(latestProgress.stage));
 
   if (!snapshot) {
     return (
@@ -363,7 +485,59 @@ export function App() {
         <div className="status-strip__value">{working ?? message}</div>
       </section>
 
-      {error ? <div className="error-banner">{error}</div> : null}
+      {copyNotice ? <div className="copy-banner">{copyNotice}</div> : null}
+
+      {error ? (
+        <div className="error-banner">
+          <div className="error-banner__head">
+            <div>
+              <strong>最近错误</strong>
+              <span>{errorTime ? formatProgressTimestamp(errorTime) : '刚刚'}</span>
+            </div>
+            <div className="inline-actions">
+              <button className="btn btn--small" onClick={() => void handleCopy('错误信息', error)}>
+                复制错误
+              </button>
+              <button className="btn btn--small" onClick={openLogFolder} disabled={!userDataRoot}>
+                打开日志目录
+              </button>
+              <button className="btn btn--small" onClick={clearError}>
+                清除提示
+              </button>
+            </div>
+          </div>
+          <div className="error-banner__body">{error}</div>
+        </div>
+      ) : null}
+
+      {updateInFlight ? (
+        <section className="progress-card">
+          <div className="progress-card__head">
+            <div>
+              <strong>更新正在进行</strong>
+              <span>{latestProgress?.detail ?? '正在准备更新步骤...'}</span>
+            </div>
+            {typeof latestProgress?.percent === 'number' ? <strong>{latestProgress.percent}%</strong> : null}
+          </div>
+          <div className="progress-bar" aria-hidden="true">
+            <div
+              className="progress-bar__fill"
+              style={{ width: `${Math.max(8, latestProgress?.percent ?? 12)}%` }}
+            />
+          </div>
+          <div className="check-list">
+            {updateProgressEvents.length > 0 ? (
+              updateProgressEvents.map((event, index) => (
+                <div key={`${event.timestamp}-${index}`} className="check-list__item">
+                  [{formatProgressTimestamp(event.timestamp)}] {event.detail}
+                </div>
+              ))
+            ) : (
+              <div className="check-list__item">正在向 GitHub 检查最新版本，请稍候。</div>
+            )}
+          </div>
+        </section>
+      ) : null}
 
       <section className="nav-tabs">
         {tabs.map((tab) => (
@@ -441,6 +615,9 @@ export function App() {
                   </button>
                   <button className="btn" onClick={openLogFolder} disabled={!userDataRoot}>
                     打开日志目录
+                  </button>
+                  <button className="btn" onClick={() => void refreshLogs()} disabled={logsBusy}>
+                    {logsBusy ? '正在刷新日志...' : '刷新日志内容'}
                   </button>
                   {update?.updateAvailable ? (
                     <button className="btn btn--accent" onClick={applyUpdate} disabled={working !== null || launchBusy}>
@@ -526,6 +703,35 @@ export function App() {
                   <button className="btn" onClick={openLogFolder} disabled={!userDataRoot}>
                     打开日志目录
                   </button>
+                  <button className="btn" onClick={openStartupLog} disabled={!startupLogPath}>
+                    打开 startup.log
+                  </button>
+                  <button className="btn" onClick={openOtaLog} disabled={!otaLogPath}>
+                    打开 ota-update.log
+                  </button>
+                  <button className="btn" onClick={() => void refreshLogs()} disabled={logsBusy}>
+                    {logsBusy ? '正在刷新日志...' : '刷新日志内容'}
+                  </button>
+                  <button className="btn" onClick={() => void handleCopy('startup.log', startupLogText)}>
+                    复制 startup.log
+                  </button>
+                  <button className="btn" onClick={() => void handleCopy('ota-update.log', otaLogText)}>
+                    复制 ota-update.log
+                  </button>
+                </div>
+                <div className="log-preview-grid">
+                  <div className="log-preview">
+                    <div className="log-preview__head">
+                      <strong>startup.log</strong>
+                    </div>
+                    <pre className="log-preview__body">{startupLogText}</pre>
+                  </div>
+                  <div className="log-preview">
+                    <div className="log-preview__head">
+                      <strong>ota-update.log</strong>
+                    </div>
+                    <pre className="log-preview__body">{otaLogText}</pre>
+                  </div>
                 </div>
               </div>
             </Card>
