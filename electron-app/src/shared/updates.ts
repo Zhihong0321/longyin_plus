@@ -272,11 +272,11 @@ export async function stageGitHubUpdate(
     throw new Error('下载的更新包未通过 SHA-256 校验。');
   }
 
-  const stageRoot = path.join(os.tmpdir(), 'longyin-plus-update', manifest.version);
+  const stageBaseRoot = path.join(os.tmpdir(), 'longyin-plus-update');
+  await fs.mkdir(stageBaseRoot, { recursive: true });
+  const stageRoot = await fs.mkdtemp(path.join(stageBaseRoot, `${manifest.version}-`));
   const zipPath = path.join(stageRoot, manifest.zipAsset);
   onProgress?.('校验通过，正在准备暂存目录...', 100);
-  await fs.rm(stageRoot, { recursive: true, force: true });
-  await fs.mkdir(stageRoot, { recursive: true });
   await writeBuffer(zipPath, zipBuffer);
   onProgress?.('正在解压更新包并准备替换文件...', 100);
   await extractFilteredZip(zipPath, stageRoot, manifest.preservePaths ?? ['user-data/**']);
@@ -285,31 +285,47 @@ export async function stageGitHubUpdate(
   return { stageRoot, manifest };
 }
 
-export async function launchUpdateHelper(
-  helperScriptPath: string,
+export async function prepareUpdaterBinary(updaterBinaryPath: string): Promise<string> {
+  if (!(await fileExists(updaterBinaryPath))) {
+    throw new Error(`未找到 OTA 更新器：${updaterBinaryPath}`);
+  }
+
+  const helperRoot = path.join(os.tmpdir(), 'longyin-plus-update', 'helpers');
+  await fs.mkdir(helperRoot, { recursive: true });
+  const runRoot = await fs.mkdtemp(path.join(helperRoot, 'run-'));
+  const helperPath = path.join(runRoot, path.basename(updaterBinaryPath));
+  await fs.copyFile(updaterBinaryPath, helperPath);
+  return helperPath;
+}
+
+export async function launchUpdaterApp(
+  updaterBinaryPath: string,
   waitPid: number,
   stageRoot: string,
   targetRoot: string,
   appExecutableName: string,
-  logPath: string
+  logPath: string,
+  version: string
 ): Promise<void> {
-  if (!(await fileExists(helperScriptPath))) {
-    throw new Error(`未找到 OTA 更新脚本：${helperScriptPath}`);
-  }
+  const helperBinaryPath = await prepareUpdaterBinary(updaterBinaryPath);
 
-  const child = spawn('cmd.exe', [
-    '/d',
-    '/c',
-    helperScriptPath,
+  const child = spawn(helperBinaryPath, [
+    '--wait-pid',
     String(waitPid),
+    '--source',
     stageRoot,
+    '--target',
     targetRoot,
+    '--exe',
     appExecutableName,
-    logPath
+    '--log',
+    logPath,
+    '--version',
+    version
   ], {
     detached: true,
     stdio: 'ignore',
-    windowsHide: true
+    windowsHide: false
   });
   child.unref();
 }

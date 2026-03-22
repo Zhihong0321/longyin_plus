@@ -33,6 +33,7 @@ export const BATTLE_TURBO_HOTKEYS = [
 export function defaultSettings(): VisibleSettings {
   return {
     lockStamina: true,
+    treasureChestAutoPickMostValuable: true,
     expMultiplier: 1,
     creationPointMultiplier: 1,
     horseBaseSpeedMultiplier: 1,
@@ -54,6 +55,7 @@ export function defaultSettings(): VisibleSettings {
     drinkPlayerPowerCostMultiplier: 1,
     drinkEnemyPowerCostMultiplier: 1,
     dialogMonthlyLimitMultiplier: 3,
+    dialogFastForwardAssistEnabled: false,
     dailySkillInsightChancePercent: 0,
     dailySkillInsightExpPercent: 5,
     dailySkillInsightUseRarityScaling: true,

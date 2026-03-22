@@ -2,7 +2,7 @@
   "name": "longyin-plus-electron",
   "author": "Zhihong0321",
   "private": true,
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "龙胤立志传 Pro Max 的便携式 Electron 启动器与更新器",
   "main": "dist/main/main.js",
   "type": "commonjs",
@@ -11,7 +11,8 @@
     "dev:main": "tsc -p tsconfig.main.json -w",
     "dev:renderer": "vite",
     "dev:electron": "wait-on dist/main/main.js dist/renderer/index.html && electron .",
-    "build": "npm run build:main && npm run build:renderer && set CSC_IDENTITY_AUTO_DISCOVERY=false&&electron-builder --win zip && npm run build:manifest",
+    "build": "npm run build:updater && npm run build:main && npm run build:renderer && set CSC_IDENTITY_AUTO_DISCOVERY=false&&electron-builder --win zip && npm run build:manifest",
+    "build:updater": "pwsh -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\build-updater.ps1",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build:manifest": "node scripts/generate-update-manifest.mjs",
@@ -55,8 +56,8 @@
         "to": "payload"
       },
       {
-        "from": "scripts/apply-ota-update.cmd",
-        "to": "updater/apply-ota-update.cmd"
+        "from": "updater-dist/LongYinUpdater.exe",
+        "to": "updater/LongYinUpdater.exe"
       }
     ],
     "win": {

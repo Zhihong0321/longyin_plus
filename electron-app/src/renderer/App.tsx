@@ -822,6 +822,12 @@ export function App() {
                   value={settings.lockStamina}
                   onChange={(value) => updateSetting('lockStamina', value)}
                 />
+                <CheckboxField
+                  label="宝箱自动选最高价值"
+                  value={settings.treasureChestAutoPickMostValuable}
+                  onChange={(value) => updateSetting('treasureChestAutoPickMostValuable', value)}
+                  hint="探索宝箱多选奖励出现后，自动拿取价值最高的一项。"
+                />
                 <NumberField
                   label="书籍经验倍率"
                   value={settings.expMultiplier}
@@ -983,6 +989,12 @@ export function App() {
                   max={999}
                   step={1}
                   hint="影响交谈、请教等每月互动次数。"
+                />
+                <CheckboxField
+                  label="启用剧情快进辅助"
+                  value={settings.dialogFastForwardAssistEnabled}
+                  onChange={(value) => updateSetting('dialogFastForwardAssistEnabled', value)}
+                  hint="在剧情出现快进按钮时自动开启快进，游戏内热键仍然是 P。"
                 />
                 <NumberField
                   label="辩论我方伤害倍率"

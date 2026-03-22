@@ -24,6 +24,7 @@ interface MainConfigHidden {
   moveRevealRadius: number;
   revealAllOnStepTile: boolean;
   treasureChestChoiceEnabled: boolean;
+  treasureChestAutoPickMostValuable: boolean;
   treasureChestChoiceOptions: number;
   treasureChestTotalItems: number;
 }
@@ -43,6 +44,7 @@ interface BattleConfigHidden {
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
+  treasureChestAutoPickMostValuable: true,
   expMultiplier: 1,
   creationPointMultiplier: 1,
   horseBaseSpeedMultiplier: 1,
@@ -64,6 +66,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   drinkPlayerPowerCostMultiplier: 1,
   drinkEnemyPowerCostMultiplier: 1,
   dialogMonthlyLimitMultiplier: 3,
+  dialogFastForwardAssistEnabled: false,
   dailySkillInsightChancePercent: 0,
   dailySkillInsightExpPercent: 5,
   dailySkillInsightUseRarityScaling: true,
@@ -84,6 +87,7 @@ const DEFAULT_MAIN_HIDDEN: MainConfigHidden = {
   moveRevealRadius: 2,
   revealAllOnStepTile: true,
   treasureChestChoiceEnabled: true,
+  treasureChestAutoPickMostValuable: true,
   treasureChestChoiceOptions: 3,
   treasureChestTotalItems: 2
 };
@@ -332,6 +336,7 @@ RevealExtraFogOnMove = ${boolText(hidden.revealExtraFogOnMove)}
 MoveRevealRadius = ${hidden.moveRevealRadius}
 RevealAllOnStepTile = ${boolText(hidden.revealAllOnStepTile)}
 TreasureChestChoiceEnabled = ${boolText(hidden.treasureChestChoiceEnabled)}
+TreasureChestAutoPickMostValuable = ${boolText(settings.treasureChestAutoPickMostValuable)}
 TreasureChestChoiceOptions = ${hidden.treasureChestChoiceOptions}
 TreasureChestTotalItems = ${hidden.treasureChestTotalItems}
 
@@ -379,6 +384,8 @@ EnemyPowerCostMultiplier = ${formatFloat(settings.drinkEnemyPowerCostMultiplier)
 
 [DialogFlow]
 MonthlyLimitMultiplier = ${formatFloat(settings.dialogMonthlyLimitMultiplier)}
+FastForwardAssistEnabled = ${boolText(settings.dialogFastForwardAssistEnabled)}
+ToggleFastForwardAssistHotkey = P
 
 [DailySkillInsight]
 HitChancePercent = ${settings.dailySkillInsightChancePercent}
@@ -503,6 +510,7 @@ export async function removeLegacyArtifacts(gameRoot: string): Promise<void> {
 function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
   return {
     lockStamina: input.lockStamina,
+    treasureChestAutoPickMostValuable: input.treasureChestAutoPickMostValuable,
     expMultiplier: Math.round(clamp(input.expMultiplier, 1, 999)),
     creationPointMultiplier: Math.round(clamp(input.creationPointMultiplier, 1, 999)),
     horseBaseSpeedMultiplier: clamp(input.horseBaseSpeedMultiplier, 0.01, 999),
@@ -524,6 +532,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     drinkPlayerPowerCostMultiplier: clamp(input.drinkPlayerPowerCostMultiplier, 0, 999),
     drinkEnemyPowerCostMultiplier: clamp(input.drinkEnemyPowerCostMultiplier, 0, 999),
     dialogMonthlyLimitMultiplier: clamp(input.dialogMonthlyLimitMultiplier, 0, 999),
+    dialogFastForwardAssistEnabled: input.dialogFastForwardAssistEnabled,
     dailySkillInsightChancePercent: Math.round(clamp(input.dailySkillInsightChancePercent, 0, 100)),
     dailySkillInsightExpPercent: clamp(input.dailySkillInsightExpPercent, 0, 999),
     dailySkillInsightUseRarityScaling: input.dailySkillInsightUseRarityScaling,
@@ -551,6 +560,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
 
   return {
     lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
+    treasureChestAutoPickMostValuable: readBool(
+      text,
+      'TreasureChestAutoPickMostValuable',
+      DEFAULT_VISIBLE_SETTINGS.treasureChestAutoPickMostValuable
+    ),
     expMultiplier: readInt(text, 'ExpMultiplier', DEFAULT_VISIBLE_SETTINGS.expMultiplier),
     creationPointMultiplier: readInt(text, 'PointMultiplier', DEFAULT_VISIBLE_SETTINGS.creationPointMultiplier),
     horseBaseSpeedMultiplier: readFloat(text, 'BaseSpeedMultiplier', DEFAULT_VISIBLE_SETTINGS.horseBaseSpeedMultiplier),
@@ -603,6 +617,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       dialogFlowSection,
       'MonthlyLimitMultiplier',
       DEFAULT_VISIBLE_SETTINGS.dialogMonthlyLimitMultiplier
+    ),
+    dialogFastForwardAssistEnabled: readBool(
+      dialogFlowSection,
+      'FastForwardAssistEnabled',
+      DEFAULT_VISIBLE_SETTINGS.dialogFastForwardAssistEnabled
     ),
     dailySkillInsightChancePercent: readInt(
       dailySkillInsightSection,
@@ -824,6 +843,11 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
 
   let nextMain = mainText;
   nextMain = upsertIniValue(nextMain, 'LockStamina', boolText(normalized.lockStamina));
+  nextMain = upsertIniValue(
+    nextMain,
+    'TreasureChestAutoPickMostValuable',
+    boolText(normalized.treasureChestAutoPickMostValuable)
+  );
   nextMain = upsertIniValue(nextMain, 'ExpMultiplier', String(normalized.expMultiplier));
   nextMain = upsertIniValue(nextMain, 'PointMultiplier', String(normalized.creationPointMultiplier));
   nextMain = upsertIniValue(nextMain, 'BaseSpeedMultiplier', formatFloat(normalized.horseBaseSpeedMultiplier));
@@ -882,6 +906,13 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'MonthlyLimitMultiplier',
     formatFloat(normalized.dialogMonthlyLimitMultiplier)
   );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'DialogFlow',
+    'FastForwardAssistEnabled',
+    boolText(normalized.dialogFastForwardAssistEnabled)
+  );
+  nextMain = upsertIniSectionValue(nextMain, 'DialogFlow', 'ToggleFastForwardAssistHotkey', 'P');
   nextMain = removeIniSectionValue(nextMain, 'DialogFlow', 'ForceAutoContinueEnabled');
   nextMain = removeIniSectionValue(nextMain, 'DialogFlow', 'ForceAutoContinueHotkey');
   nextMain = removeIniSectionValue(nextMain, 'DialogFlow', 'ForceAutoContinuePulseIntervalSeconds');

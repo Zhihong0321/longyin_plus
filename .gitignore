@@ -9,8 +9,12 @@ mod-prototype/mod-prototype/
 electron-app/node_modules/
 electron-app/dist/
 electron-app/release/
+electron-app/updater-dist/
 mod-src/bin/
+mod-src/*/bin/
 mod-src/*/artifacts/
+updater-app/**/bin/
+updater-app/**/obj/
 
 # Local tool state
 mod-prototype/LongYinModControl/*.json

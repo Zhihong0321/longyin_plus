@@ -16,7 +16,7 @@ import { detectSteamGameRoot, isValidGameRoot } from './shared/steam';
 import {
   checkGitHubRelease,
   fetchReleaseHistory,
-  launchUpdateHelper,
+  launchUpdaterApp,
   stageGitHubUpdate
 } from './shared/updates';
 import {
@@ -45,12 +45,13 @@ const USER_DATA_ROOT = process.env.LONGYIN_USER_DATA_ROOT ?? path.join(APP_ROOT,
 const SETTINGS_PATH = path.join(USER_DATA_ROOT, 'settings.json');
 const STARTUP_LOG_PATH = path.join(USER_DATA_ROOT, 'startup.log');
 const OTA_LOG_PATH = path.join(USER_DATA_ROOT, 'ota-update.log');
-const OTA_HELPER_SCRIPT_PATH = IS_PACKAGED
-  ? path.join(process.resourcesPath, 'updater', 'apply-ota-update.cmd')
-  : path.resolve(APP_CONTENT_ROOT, 'scripts', 'apply-ota-update.cmd');
+const OTA_UPDATER_PATH = IS_PACKAGED
+  ? path.join(process.resourcesPath, 'updater', 'LongYinUpdater.exe')
+  : path.resolve(APP_CONTENT_ROOT, 'updater-dist', 'LongYinUpdater.exe');
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
+  treasureChestAutoPickMostValuable: true,
   expMultiplier: 1,
   creationPointMultiplier: 1,
   horseBaseSpeedMultiplier: 1,
@@ -72,6 +73,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   drinkPlayerPowerCostMultiplier: 1,
   drinkEnemyPowerCostMultiplier: 1,
   dialogMonthlyLimitMultiplier: 3,
+  dialogFastForwardAssistEnabled: false,
   dailySkillInsightChancePercent: 0,
   dailySkillInsightExpPercent: 5,
   dailySkillInsightUseRarityScaling: true,
@@ -487,13 +489,14 @@ async function applyUpdate(): Promise<OperationResult> {
     });
     await writeStartupLog(`OTA 暂存目录：${stageRoot}`);
     emitUpdateProgress('preparing', '下载和解压已完成，正在启动后台替换程序...', 100);
-    await launchUpdateHelper(
-      OTA_HELPER_SCRIPT_PATH,
+    await launchUpdaterApp(
+      OTA_UPDATER_PATH,
       process.pid,
       stageRoot,
       APP_ROOT,
       path.basename(process.execPath),
-      OTA_LOG_PATH
+      OTA_LOG_PATH,
+      update.latestVersion
     );
     emitUpdateProgress('applying', '后台更新器已启动，应用即将退出并自动重启。', 100);
     void setTimeout(() => app.quit(), 250);

@@ -9,7 +9,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.13")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.14")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -40,6 +40,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<int> _moveRevealRadius = null!;
     private static ConfigEntry<bool> _revealAllOnStepTile = null!;
     private static ConfigEntry<bool> _treasureChestChoiceEnabled = null!;
+    private static ConfigEntry<bool> _treasureChestAutoPickMostValuable = null!;
     private static ConfigEntry<int> _treasureChestChoiceOptions = null!;
     private static ConfigEntry<int> _treasureChestTotalItems = null!;
     private static ConfigEntry<int> _bookExpMultiplier = null!;
@@ -73,6 +74,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<bool> _dialogFastForwardAssistEnabled = null!;
     private static ConfigEntry<KeyCode> _dialogFastForwardAssistHotkey = null!;
     private static ConfigEntry<bool> _traceMode = null!;
+    private static ConfigEntry<bool> _traceDialogFastForward = null!;
     private static ConfigEntry<bool> _traceTreasureChestEvents = null!;
     private static ConfigEntry<bool> _freezeDate = null!;
     private static ConfigEntry<KeyCode> _freezeDateHotkey = null!;
@@ -156,6 +158,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         public string? LastObservedChoiceParam { get; set; }
         public bool PendingClickConfirm { get; set; }
         public int PendingClickConfirmFrames { get; set; }
+        public bool PendingAutoPick { get; set; }
+        public int PendingAutoPickFrames { get; set; }
     }
 
     private static TreasureChestChoiceSession? _activeTreasureChestChoiceSession;
@@ -168,6 +172,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _moveRevealRadius = Config.Bind("Exploration", "MoveRevealRadius", 2, "Legacy compatibility value for the old per-move reveal experiment. No longer used.");
         _revealAllOnStepTile = Config.Bind("Exploration", "RevealAllOnStepTile", true, "Reveal the whole exploration map once, after the first completed move in each exploration run.");
         _treasureChestChoiceEnabled = Config.Bind("Exploration", "TreasureChestChoiceEnabled", true, "When true, exploration treasure chests show several reward items and let you choose 1.");
+        _treasureChestAutoPickMostValuable = Config.Bind("Exploration", "TreasureChestAutoPickMostValuable", true, "When true, treasure chest choice mode automatically takes the highest-value option.");
         _treasureChestChoiceOptions = Config.Bind("Exploration", "TreasureChestChoiceOptions", 3, "How many reward options each exploration treasure chest should show when choice mode is enabled.");
         _treasureChestTotalItems = Config.Bind("Exploration", "TreasureChestTotalItems", 2, "Total item rewards to grant from exploration treasure chests. Set to 1 for vanilla behavior.");
         _bookExpMultiplier = Config.Bind("ReadBook", "ExpMultiplier", 1, "Multiplies EXP gained from reading books.");
@@ -201,6 +206,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _dialogFastForwardAssistEnabled = Config.Bind("DialogFlow", "FastForwardAssistEnabled", false, "When true, the mod automatically turns on plot fast-forward (快进) whenever the current dialog actually exposes the skip button.");
         _dialogFastForwardAssistHotkey = Config.Bind("DialogFlow", "ToggleFastForwardAssistHotkey", KeyCode.P, "Hotkey that toggles the dialog fast-forward assist while in game.");
         _traceMode = Config.Bind("Debug", "TracerEnabled", false, "Master switch for all mod tracer logs. When false, trace helpers stay silent.");
+        _traceDialogFastForward = Config.Bind("Debug", "TraceDialogFastForward", false, "When TracerEnabled is true, logs dialog fast-forward assist decisions and key PlotController fast-forward events.");
         _traceTreasureChestEvents = Config.Bind("Debug", "TraceTreasureChestEvents", false, "When TracerEnabled is true, logs treasure chest interception, choice UI, and reward resolution.");
         _freezeDate = Config.Bind("Time", "FreezeDate", false, "Blocks in-game day, month, and year progression.");
         _freezeDateHotkey = Config.Bind("Time", "ToggleFreezeDateHotkey", KeyCode.F10, "Hotkey that toggles date freezing while in game.");
@@ -218,6 +224,12 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(PlotController), nameof(PlotController.ChangeNextPlot), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.GoNextPlot), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.AutoPlotButtonClicked), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.ShowPlot), new[] { typeof(PlotData) }, null, nameof(DialogFastForwardShowPlotPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.ShowSinglePlot), new[] { typeof(SinglePlotData) }, null, nameof(DialogFastForwardShowSinglePlotPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlotTextShowFinished), Type.EmptyTypes, null, nameof(DialogFastForwardPlotTextShowFinishedPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlotChoiceShowFinished), Type.EmptyTypes, null, nameof(DialogFastForwardPlotChoiceShowFinishedPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.SkipPlotButtonClicked), Type.EmptyTypes, null, nameof(DialogFastForwardSkipPlotButtonClickedPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.SetSkipPlot), new[] { typeof(bool) }, null, nameof(DialogFastForwardSetSkipPlotPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ShowHeroInteractUI), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageMeetNpcPlot), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.Update), Type.EmptyTypes, null, nameof(DialogChoiceRowPostfix));
@@ -261,7 +273,9 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo("Legacy in-game mod panel is disabled. External Mod Control is the supported UI path.");
         Log.LogInfo($"Exploration stamina lock starts {(_lockExploreStamina.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Exploration first-move full reveal starts {(_revealAllOnStepTile.Value ? "ON" : "OFF")}.");
-        Log.LogInfo($"Exploration treasure chest choice mode starts {(_treasureChestChoiceEnabled.Value ? "ON" : "OFF")} with a 3-5 option chest-only picker.");
+        Log.LogInfo(
+            $"Exploration treasure chest choice mode starts {(_treasureChestChoiceEnabled.Value ? "ON" : "OFF")} with a 3-5 option chest-only picker " +
+            $"and highest-value auto-pick {(_treasureChestAutoPickMostValuable.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Exploration treasure chest rewards start at x{Math.Max(1, _treasureChestTotalItems.Value)} total items when choice mode is OFF.");
         Log.LogInfo($"Read-book EXP multiplier starts at x{Mathf.Max(1, _bookExpMultiplier.Value)}.");
         Log.LogInfo($"Character creation point multiplier starts at x{Math.Max(1, _creationPointMultiplier.Value)}.");
@@ -292,6 +306,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Dialog monthly limit multiplier starts at x{FormatConfigFloat(_dialogMonthlyLimitMultiplier.Value)}.");
         Log.LogInfo($"Dialog fast-forward assist starts {(_dialogFastForwardAssistEnabled.Value ? "ON" : "OFF")} with hotkey {_dialogFastForwardAssistHotkey.Value}.");
         Log.LogInfo($"Tracer master starts {(_traceMode.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Dialog fast-forward tracer starts {(_traceDialogFastForward.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure chest tracer starts {(_traceTreasureChestEvents.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Date freeze starts {(_freezeDate.Value ? "ON" : "OFF")} with hotkey {_freezeDateHotkey.Value}.");
         Log.LogInfo($"Outside-battle speed cycle hotkey is {_outsideBattleSpeedHotkey.Value}.");
@@ -646,7 +661,9 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             Player = player,
             Options = options,
             SkipManageItemPoison = skipManageItemPoison,
-            OpenedAtRealtime = Time.realtimeSinceStartup
+            OpenedAtRealtime = Time.realtimeSinceStartup,
+            PendingAutoPick = _treasureChestAutoPickMostValuable.Value,
+            PendingAutoPickFrames = _treasureChestAutoPickMostValuable.Value ? 2 : 0
         };
 
         try
@@ -933,6 +950,11 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return;
         }
 
+        if (TryRunPendingTreasureChestAutoPick(session, plotController))
+        {
+            return;
+        }
+
         var currentParam = TryGetTreasureChestCurrentChoiceParam(plotController);
         if (!string.IsNullOrWhiteSpace(currentParam))
         {
@@ -967,6 +989,90 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         session.PendingClickConfirm = false;
         plotController.AutoPlotButtonClicked();
+    }
+
+    private static bool TryRunPendingTreasureChestAutoPick(TreasureChestChoiceSession session, PlotController plotController)
+    {
+        if (!session.PendingAutoPick)
+        {
+            return false;
+        }
+
+        if (session.PendingAutoPickFrames > 0)
+        {
+            session.PendingAutoPickFrames--;
+            return true;
+        }
+
+        session.PendingAutoPick = false;
+        var bestIndex = FindBestTreasureChestChoiceIndex(session.Options);
+        if (bestIndex < 0 || bestIndex >= session.Options.Count)
+        {
+            return false;
+        }
+
+        var chosenItem = session.Options[bestIndex];
+        TraceTreasureChestEvent(
+            "TryRunPendingTreasureChestAutoPick resolved",
+            session.Player,
+            chosenItem,
+            1,
+            session.SkipManageItemPoison,
+            $"index={bestIndex}, options={DescribeItemSummaries(session.Options)}");
+        GrantTreasureChestChoiceReward(session, chosenItem, $"auto:value:{bestIndex}");
+        TryCloseTreasureChestChoicePlot(plotController);
+        return true;
+    }
+
+    private static int FindBestTreasureChestChoiceIndex(IReadOnlyList<ItemData> options)
+    {
+        if (options == null || options.Count <= 0)
+        {
+            return -1;
+        }
+
+        var bestIndex = 0;
+        for (var i = 1; i < options.Count; i++)
+        {
+            if (CompareTreasureChestChoicePriority(options[i], options[bestIndex]) > 0)
+            {
+                bestIndex = i;
+            }
+        }
+
+        return bestIndex;
+    }
+
+    private static int CompareTreasureChestChoicePriority(ItemData? left, ItemData? right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return -1;
+        }
+
+        if (right == null)
+        {
+            return 1;
+        }
+
+        var valueComparison = left.value.CompareTo(right.value);
+        if (valueComparison != 0)
+        {
+            return valueComparison;
+        }
+
+        var rarityComparison = left.rareLv.CompareTo(right.rareLv);
+        if (rarityComparison != 0)
+        {
+            return rarityComparison;
+        }
+
+        return left.itemLv.CompareTo(right.itemLv);
     }
 
     private static void TryGrantTreasureChestBonusItems(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
@@ -1622,6 +1728,36 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return true;
     }
 
+    private static void DialogFastForwardShowPlotPostfix(PlotController __instance)
+    {
+        TraceDialogFastForwardEvent("ShowPlot", __instance);
+    }
+
+    private static void DialogFastForwardShowSinglePlotPostfix(PlotController __instance)
+    {
+        TraceDialogFastForwardEvent("ShowSinglePlot", __instance);
+    }
+
+    private static void DialogFastForwardPlotTextShowFinishedPostfix(PlotController __instance)
+    {
+        TraceDialogFastForwardEvent("PlotTextShowFinished", __instance);
+    }
+
+    private static void DialogFastForwardPlotChoiceShowFinishedPostfix(PlotController __instance)
+    {
+        TraceDialogFastForwardEvent("PlotChoiceShowFinished", __instance);
+    }
+
+    private static void DialogFastForwardSkipPlotButtonClickedPostfix(PlotController __instance)
+    {
+        TraceDialogFastForwardEvent("SkipPlotButtonClicked", __instance);
+    }
+
+    private static void DialogFastForwardSetSkipPlotPostfix(PlotController __instance, bool _skip)
+    {
+        TraceDialogFastForwardEvent("SetSkipPlot", __instance, $"requestedSkip={_skip}");
+    }
+
     private static void CacheActiveDialogHero(HeroData? hero)
     {
         _activeDialogHero = hero;
@@ -1751,6 +1887,10 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         var shouldEnableSkip = _dialogFastForwardAssistEnabled.Value && IsDialogFastForwardCurrentlyAvailable(plotController);
         var isCurrentlySkipping = plotController.plotSkipping;
+        TraceDialogFastForwardEvent(
+            "AssistUpdate",
+            plotController,
+            $"assistEnabled={_dialogFastForwardAssistEnabled.Value}, shouldEnable={shouldEnableSkip}, ownsSkip={_dialogFastForwardAssistOwnsSkip}, isCurrentlySkipping={isCurrentlySkipping}");
 
         if (shouldEnableSkip)
         {
@@ -1777,7 +1917,11 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         {
             var skipButton = plotController.plotSkipButton;
             var canUseButtonPath = skipButton != null && skipButton.activeInHierarchy;
-            if (canUseButtonPath)
+            TraceDialogFastForwardEvent(
+                "AssistTrigger",
+                plotController,
+                $"enable={enable}, canUseButtonPath={canUseButtonPath}, currentSkipping={plotController.plotSkipping}");
+            if (enable && canUseButtonPath)
             {
                 plotController.SkipPlotButtonClicked();
                 return;
@@ -1791,33 +1935,21 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         plotController.SetSkipPlot(enable);
     }
 
+    private static bool IsDialogFastForwardTraceEnabled()
+    {
+        return _traceMode.Value && _traceDialogFastForward.Value;
+    }
+
     private static bool IsDialogFastForwardCurrentlyAvailable(PlotController plotController)
     {
         try
         {
-            if (HasActiveDialogChoice(plotController))
-            {
-                return false;
-            }
-
             var skipButton = plotController.plotSkipButton;
             return skipButton != null && skipButton.activeInHierarchy;
         }
         catch (Exception ex)
         {
             LoggerInstance.LogWarning($"Dialog fast-forward assist availability check failed: {ex.Message}");
-            return false;
-        }
-    }
-
-    private static bool HasActiveDialogChoice(PlotController plotController)
-    {
-        try
-        {
-            return plotController.plotChoiceShowing || plotController.nowChoice != null || plotController.newChoice != null;
-        }
-        catch
-        {
             return false;
         }
     }
@@ -1830,6 +1962,10 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             UpdateDialogFastForwardAssist();
         }
 
+        TraceDialogFastForwardEvent(
+            "AssistToggle",
+            PlotController.Instance,
+            $"source={source}, enabled={_dialogFastForwardAssistEnabled.Value}, ownsSkip={_dialogFastForwardAssistOwnsSkip}");
         LoggerInstance.LogInfo($"Dialog fast-forward assist {(_dialogFastForwardAssistEnabled.Value ? "enabled" : "disabled")} from {source}.");
         PushPlayerLog($"Mod: 快进辅助 {(_dialogFastForwardAssistEnabled.Value ? "ON" : "OFF")}");
     }
@@ -2228,6 +2364,25 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             $"player={TryGetHeroName(player)}/{SafeFormatValue(TryGetHeroId(player))}, " +
             $"item={DescribeItemSummary(itemData)}, chestClick={treasureChestClickTime}, " +
             $"skipManageItemPoison={SafeFormatValue(skipManageItemPoison)}, session={sessionSummary}, {plotSummary}" +
+            $"{(string.IsNullOrWhiteSpace(extra) ? string.Empty : $", {extra}")}");
+    }
+
+    private static void TraceDialogFastForwardEvent(string stage, PlotController? plotController, string? extra = null)
+    {
+        if (!IsDialogFastForwardTraceEnabled())
+        {
+            return;
+        }
+
+        var summary = plotController == null
+            ? "plot=unavailable"
+            : $"skipButtonActive={SafeFormatValue(plotController.plotSkipButton != null && plotController.plotSkipButton.activeInHierarchy)}, " +
+              $"plotSkipping={SafeFormatValue(plotController.plotSkipping)}, plotChoiceShowing={SafeFormatValue(plotController.plotChoiceShowing)}, " +
+              $"choiceNow={SafeFormatValue(TryGetChoiceParam(plotController.nowChoice))}, choiceNew={SafeFormatValue(TryGetChoiceParam(plotController.newChoice))}, " +
+              $"plotText={SafeFormatValue(TryReadPlotText(plotController))}";
+
+        LoggerInstance.LogInfo(
+            $"[TRACE][DialogFastForward] {stage}: {summary}" +
             $"{(string.IsNullOrWhiteSpace(extra) ? string.Empty : $", {extra}")}");
     }
 

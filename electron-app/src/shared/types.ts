@@ -5,6 +5,7 @@ export const APP_FOLDER_NAME = 'LongYinProMaxApp';
 
 export interface VisibleSettings {
   lockStamina: boolean;
+  treasureChestAutoPickMostValuable: boolean;
   expMultiplier: number;
   creationPointMultiplier: number;
   horseBaseSpeedMultiplier: number;
@@ -26,6 +27,7 @@ export interface VisibleSettings {
   drinkPlayerPowerCostMultiplier: number;
   drinkEnemyPowerCostMultiplier: number;
   dialogMonthlyLimitMultiplier: number;
+  dialogFastForwardAssistEnabled: boolean;
   dailySkillInsightChancePercent: number;
   dailySkillInsightExpPercent: number;
   dailySkillInsightUseRarityScaling: boolean;
